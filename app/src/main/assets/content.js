@@ -82,17 +82,17 @@ window.GardenContent = (() => {
     ]}
   ];
   const varieties = [
-    {name:'Bobo',height:'до 0,8 м',color:'Белый → нежно-розовый',bloom:'Ранний',tag:'Компактный'},
-    {name:'Little Lime',height:'0,9–1,5 м',color:'Лайм → розовый',bloom:'Средний',tag:'Компактный'},
-    {name:'Limelight',height:'около 1,6 м',color:'Лайм → кремовый',bloom:'Средний',tag:'Лаймовый'},
-    {name:'Vanille Fraise',height:'около 1,5 м',color:'Белый → розовый',bloom:'Среднеранний',tag:'Двухцветный'},
+    {name:'Bobo',photo:"https://commons.wikimedia.org/wiki/Special:FilePath/Bobo_Hydrangea.jpg?width=780",photoSource:"https://commons.wikimedia.org/wiki/File:Bobo_Hydrangea.jpg",photoAuthor:"Michele Dorsey Walfred",photoLicense:"CC BY 2.0",height:'до 0,8 м',color:'Белый → нежно-розовый',bloom:'Ранний',tag:'Компактный'},
+    {name:'Little Lime',photo:"https://commons.wikimedia.org/wiki/Special:FilePath/Hydrangea_paniculata_%E2%80%9CLittle_Lime%E2%80%9D.jpg?width=780",photoSource:"https://commons.wikimedia.org/wiki/File:Hydrangea_paniculata_%E2%80%9CLittle_Lime%E2%80%9D.jpg",photoAuthor:"Michele Dorsey Walfred",photoLicense:"CC BY 2.0",height:'0,9–1,5 м',color:'Лайм → розовый',bloom:'Средний',tag:'Компактный'},
+    {name:'Limelight',photo:"https://commons.wikimedia.org/wiki/Special:FilePath/Hydrangea_paniculata_'Limelight'.JPG?width=780",photoSource:"https://commons.wikimedia.org/wiki/File:Hydrangea_paniculata_'Limelight'.JPG",photoAuthor:"James Steakley",photoLicense:"CC BY-SA 3.0",height:'около 1,6 м',color:'Лайм → кремовый',bloom:'Средний',tag:'Лаймовый'},
+    {name:'Vanille Fraise',photo:"https://commons.wikimedia.org/wiki/Special:FilePath/Hydrngea_paniculata_'Vanille-Fraise'_bloeiwijze.jpg?width=780",photoSource:"https://commons.wikimedia.org/wiki/File:Hydrngea_paniculata_'Vanille-Fraise'_bloeiwijze.jpg",photoAuthor:"Homoarborea",photoLicense:"CC0 1.0",height:'около 1,5 м',color:'Белый → розовый',bloom:'Среднеранний',tag:'Двухцветный'},
     {name:'Самарская Лидия',height:'около 1,2 м',color:'Белый → насыщенно-розовый',bloom:'Средний',tag:'Компактный'},
-    {name:'Pinky Winky',height:'1,5–1,8 м',color:'Белый + тёмно-розовый',bloom:'Средний',tag:'Двухцветный'},
-    {name:'Phantom',height:'около 2 м',color:'Кремово-белый → розовый',bloom:'Поздний',tag:'Высокий'},
-    {name:'Grandiflora',height:'2–3 м и выше',color:'Кремовый → белый',bloom:'Поздний',tag:'Высокий'},
+    {name:'Pinky Winky',photo:"https://commons.wikimedia.org/wiki/Special:FilePath/Hydrangea_paniculata_'Pinky_Winky'_JRVdH_03.jpg?width=780",photoSource:"https://commons.wikimedia.org/wiki/File:Hydrangea_paniculata_'Pinky_Winky'_JRVdH_03.jpg",photoAuthor:"Cephas",photoLicense:"CC BY-SA 4.0",height:'1,5–1,8 м',color:'Белый + тёмно-розовый',bloom:'Средний',tag:'Двухцветный'},
+    {name:'Phantom',photo:"https://commons.wikimedia.org/wiki/Special:FilePath/Hydrangea_paniculata_'Phantom'_JRVdH_01.jpg?width=780",photoSource:"https://commons.wikimedia.org/wiki/File:Hydrangea_paniculata_'Phantom'_JRVdH_01.jpg",photoAuthor:"Cephas",photoLicense:"CC BY-SA 4.0",height:'около 2 м',color:'Кремово-белый → розовый',bloom:'Поздний',tag:'Высокий'},
+    {name:'Grandiflora',photo:"https://commons.wikimedia.org/wiki/Special:FilePath/Hydrangea_paniculata_'Grandiflora'%2C_Tallinn_Botanic_Garden_02.jpg?width=780",photoSource:"https://commons.wikimedia.org/wiki/File:Hydrangea_paniculata_'Grandiflora'%2C_Tallinn_Botanic_Garden_02.jpg",photoAuthor:"Shuvaev",photoLicense:"CC BY 4.0",height:'2–3 м и выше',color:'Кремовый → белый',bloom:'Поздний',tag:'Высокий'},
     {name:'Diamant Rouge',height:'до 1,5 м',color:'Белый → малиновый',bloom:'Средний',tag:'Яркий'},
     {name:'Quick Fire',height:'около 2 м',color:'Белый → тёмно-розовый',bloom:'Ранний',tag:'Ранний'},
-    {name:'Tardiva',height:'до 2 м',color:'Кремово-белый',bloom:'Поздний',tag:'Поздний'},
+    {name:'Tardiva',photo:"https://commons.wikimedia.org/wiki/Special:FilePath/Hydrangea_paniculata_'Tardiva'_Hortensja_bukietowa_2017-10-15_02.jpg?width=780",photoSource:"https://commons.wikimedia.org/wiki/File:Hydrangea_paniculata_'Tardiva'_Hortensja_bukietowa_2017-10-15_02.jpg",photoAuthor:"Agnieszka Kwiecień, Nova",photoLicense:"CC BY-SA 4.0",height:'до 2 м',color:'Кремово-белый',bloom:'Поздний',tag:'Поздний'},
     {name:'Polar Bear',height:'около 1,8 м',color:'Белый',bloom:'Средний',tag:'Крупные соцветия'}
   ];
   const problems = [

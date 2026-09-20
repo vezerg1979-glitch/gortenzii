@@ -12,15 +12,85 @@ let plantId = '';
 let month = new Date().getMonth();
 let guideMode = 'care';
 let varietyFilter = 'Все';
+let varietySearch = '';
+let selectedVariety = '';
+let externalPhotosEnabled = false;
+let plantFilter = 'Все';
+let plantQuery = '';
+let comparePhotos = [];
+let comparePlantId = '';
+let galleryFilter = 'Все';
+let plantDraft = null;
+let editingVariety = '';
+let returningToPlant = false;
 let noticeTimer = null;
 let reminderEnabled = false;
 let data = readState();
+let galleryItems = [];
+let galleryBusy = false;
+let galleryError = '';
+let uploadPhoto = '';
+let uploadPlant = '';
+const onlineAvailable = !!(window.GardenAndroid && window.GardenAndroid.cloudConfigured && window.GardenAndroid.cloudConfigured());
+let cloudCallbacks = {};
+let cloudSeq = 0;
+function cloud(action, body={}) {
+  if (!onlineAvailable) { toast('Общий альбом пока не подключён администратором'); return Promise.reject(Error('Общий альбом не подключён')); }
+  return new Promise((resolve,reject)=>{
+    const id='r'+(++cloudSeq);
+    cloudCallbacks[id]={resolve,reject};
+    window.GardenAndroid.cloud(action, JSON.stringify(body), id);
+  });
+}
+window.cloudResponse = (id, json) => {
+  const cb=cloudCallbacks[id]; if(!cb)return; delete cloudCallbacks[id];
+  try {const result=JSON.parse(json);if(result.ok)cb.resolve(result);else cb.reject(Error(result.error||'Ошибка сети'));}
+  catch(e){cb.reject(e);}
+};
+window.nativePhotoAdded = (id, photo) => {
+  if(id.startsWith('catalog:')){
+    const key=id.slice(8);
+    if(!isCatalogKey(key)){window.GardenAndroid?.deleteLocalPhoto(photo);return;}
+    const previous=data.catalogPhotos[key];
+    data.catalogPhotos[key]=photo;save();
+    if(previous && previous!==photo)window.GardenAndroid?.deleteLocalPhoto(previous);
+    guideMode='sort';selectedVariety=key;go('guide');toast('Фото сорта сохранено только на вашем устройстве');return;
+  }
+  const p=data.plants.find(x=>x.id===id);
+  if(!p){if(window.GardenAndroid)window.GardenAndroid.deleteLocalPhoto(photo);return;}
+  p.photos=Array.isArray(p.photos)?p.photos:[];
+  if(p.photos.length>=12){window.GardenAndroid.deleteLocalPhoto(photo);toast('Не больше 12 фотографий на куст');return;}
+  p.photos.push(photo);p.photoMeta=p.photoMeta||{};p.photoMeta[photo]={day:today(),stage:'Не указана',note:''};save();go('plants',{plant:id});photoSheet(id,photo);toast('Фото добавлено — укажите дату и этап роста');
+};
+window.nativePhotoError = text => toast(text||'Не удалось добавить фотографию');
+function localPhotoUrl(id){return /^[-a-f0-9]{36}$/.test(id)?'https://garden.local/photo/'+id+'.jpg':'';}
+function picture(id,label='Фотография гортензии'){
+  const src=localPhotoUrl(id);return src?`<img class="plant-photo" src="${src}" alt="${attr(label)}" loading="lazy" onerror="this.style.display='none'"/>`:'';
+}
+
 
 function readState() {
-  try { const raw = localStorage.getItem(STORE); return raw ? C.sanitizeBackup(JSON.parse(raw)) : {version:1,plants:[],completed:[]}; }
-  catch(err) { return {version:1,plants:[],completed:[]}; }
+  try { const raw = localStorage.getItem(STORE); return raw ? C.sanitizeBackup(JSON.parse(raw)) : {version:1,plants:[],customVarieties:[],catalogPhotos:{},completed:[]}; }
+  catch(err) { return {version:1,plants:[],customVarieties:[],catalogPhotos:{},completed:[]}; }
 }
 function save() { localStorage.setItem(STORE, JSON.stringify(data)); }
+function allVarieties(){ return [...D.varieties,...data.customVarieties]; }
+function catalogKey(v){const i=D.varieties.indexOf(v);return v.id|| (i>=0?'b'+i:'');}
+function isCatalogKey(key){return D.varieties.some(v=>catalogKey(v)===key)||data.customVarieties.some(v=>v.id===key);}
+function catalogImage(v){
+ const key=catalogKey(v),local=data.catalogPhotos?.[key];
+ if(local)return {url:localPhotoUrl(local),credit:'Ваше фото · хранится на телефоне',kind:'local'};
+ if(externalPhotosEnabled && v.photo && /^https:\/\/commons\.wikimedia\.org\/wiki\/Special:FilePath\//.test(v.photo))
+   return {url:v.photo,credit:'Фото: '+v.photoAuthor+' · '+v.photoLicense+' · Wikimedia Commons',kind:'commons'};
+ return {url:'',credit:v.photo?'Для фотографии из Wikimedia Commons нажмите «Показать онлайн-фото».':'У этого сорта пока нет проверенной фотографии. Добавьте свою.',kind:'none'};
+}
+function catalogPicture(v){
+ const pic=catalogImage(v);
+ return pic.url?`<img class="catalog-photo" src="${attr(pic.url)}" alt="${attr(v.name)} — ${pic.kind==='local'?'фотография пользователя':'справочное фото сорта'}" loading="lazy" referrerpolicy="no-referrer" onerror="this.hidden=true;this.nextElementSibling.hidden=false"/><div class="catalog-placeholder" hidden>Фотография недоступна</div>`:
+ '<div class="catalog-placeholder"><span aria-hidden="true">❀</span><small>Фото пока нет</small></div>';
+}
+
+function varietyExists(name, ignoreId=''){const n=C.normalizedVarietyName(name);return allVarieties().some(v=>v.id!==ignoreId&&C.normalizedVarietyName(v.name)===n);}
 function esc(value) { return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function attr(s) { return esc(s); }
 const symbol = {
@@ -39,12 +109,14 @@ function toast(text){
 }
 function go(tab, options={}) {
   current=tab;article=options.article||'';plantId=options.plant||'';
+  if(tab!=='guide')selectedVariety='';
   if(typeof options.month === 'number') month=options.month;
   render();window.scrollTo(0,0);
 }
 window.gardenBack=()=>{
   if(!overlay.classList.contains('hidden')){closeSheet();return;}
   if(plantId){go('plants');return;}
+  if(selectedVariety){selectedVariety='';go('guide');return;}
   if(article){go('guide');return;}
   if (current !== 'today') {go('today');return 'home';}
   return 'exit';
@@ -76,7 +148,7 @@ function careCard(task, idx, calendarMonth=new Date().getMonth(), now=new Date()
 }
 function plantCard(p) {
   const status=C.moistureStatus(p), sub=p.variety||'Сорт не указан';
-  return `<button class="card plant-card" style="width:100%;text-align:left;color:inherit" data-action="open-plant" data-id="${attr(p.id)}">${plantArt()}<div class="care-text"><h3 class="clipped">${esc(p.name)}</h3><p class="clipped">${esc(sub)}${p.place?' · '+esc(p.place):''}</p><span class="small-status ${status.due?'attention':''}">${status.due?'◷ Проверьте почву':'✓ Влажность проверена'}</span></div><span class="chevron">›</span></button>`;
+  return `<button class="card plant-card" style="width:100%;text-align:left;color:inherit" data-action="open-plant" data-id="${attr(p.id)}">${p.photos?.length?picture(p.photos[p.photos.length-1],p.name):plantArt()}<div class="care-text"><h3 class="clipped">${esc(p.name)}</h3><p class="clipped">${esc(sub)}${p.place?' · '+esc(p.place):''}</p><span class="small-status ${status.due?'attention':''}">${status.due?'◷ Проверьте почву':'✓ Влажность проверена'}</span></div><span class="chevron">›</span></button>`;
 }
 function todayPage() {
   const d=new Date(),m=d.getMonth(), tasks=D.tasks[m], outstanding=tasks.filter(t=>!data.completed.includes(C.checklistKey(t.id,m,d.getFullYear())));
@@ -92,18 +164,29 @@ function todayPage() {
 }
 function plantsPage() {
   const due=data.plants.filter(p=>C.moistureStatus(p).due).length;
+  const matched=C.filterPlants(data.plants,plantQuery,plantFilter);
   return `${header()}<h1 class="page-title">Мой сад</h1><p class="sub-title">У каждого куста — своя история, особенности и уход.</p>
   <div class="stats"><div class="stat"><strong>${data.plants.length}</strong><span>гортензий в саду</span></div><div class="stat"><strong>${due}</strong><span>проверок влажности</span></div></div>
-  ${data.plants.map(plantCard).join('')}
-  ${!data.plants.length?`<div class="empty"><span class="large-emoji">🌸</span><h3>Здесь будет ваша коллекция</h3><p>Добавьте сорт, дату посадки и место в саду — всё сохранится на телефоне.</p></div>`:''}
+  <form id="plant-search-form" class="search-row"><input class="input" name="query" maxlength="80" value="${attr(plantQuery)}" aria-label="Поиск по кустам, сортам и месту" placeholder="Название, сорт или место…"/><button class="btn btn-primary" type="submit">Найти</button></form>
+  <div class="filter-row">${['Все','Проверить почву','С фотографиями'].map(f=>`<button class="filter ${f===plantFilter?'selected':''}" data-action="plant-filter" data-filter="${attr(f)}">${esc(f)}</button>`).join('')}</div>
+  <p class="muted tiny">Найдено: ${matched.length}${plantQuery?` · <button class="text-button" data-action="clear-plant-search">Сбросить поиск</button>`:''}</p>
+  ${matched.map(plantCard).join('')}
+  ${!data.plants.length?`<div class="empty"><span class="large-emoji">🌸</span><h3>Здесь будет ваша коллекция</h3><p>Добавьте сорт, дату посадки и место в саду — всё сохранится на телефоне.</p></div>`:!matched.length?`<div class="empty"><h3>Ничего не найдено</h3><p>Измените запрос или выберите другой фильтр.</p></div>`:''}
   <button class="btn btn-primary btn-block" data-action="add-plant" style="margin-top:7px">+ Добавить гортензию</button>`;
 }
 function plantDetail() {
   const p=data.plants.find(x=>x.id===plantId);if(!p)return plantsPage();
   const moisture=C.moistureStatus(p),history=(p.history||[]).slice().reverse();
   return `<div class="header-row"><button class="back" data-action="go-plants" aria-label="Вернуться">←</button><div class="eyebrow">МОЙ САД · КАРТОЧКА КУСТА</div></div>
-    <div class="detail-banner"><div><h2>${esc(p.name)}</h2><p>${esc(p.variety||'Метельчатая гортензия')}</p><span class="pill">${esc(p.place||'Место не указано')}</span></div>${plantArt()}</div>
+    <div class="detail-banner"><div><h2>${esc(p.name)}</h2><p>${esc(p.variety||'Метельчатая гортензия')}</p><span class="pill">${esc(p.place||'Место не указано')}</span></div>${p.photos?.length?picture(p.photos[p.photos.length-1],p.name):plantArt()}</div>
     <div class="card"><div class="mini-label">СОСТОЯНИЕ ПОЧВЫ</div><h3 style="font-size:17px;margin:8px 0">${esc(moisture.text)}</h3><p class="intro">${esc(moisture.secondary)}. Последняя проверка: ${p.lastCheck?dayLabel(p.lastCheck):'ещё не было'}.</p><div class="btn-row"><button class="btn btn-primary" data-action="moisture" data-id="${attr(p.id)}">Проверить почву</button><button class="btn btn-outline" data-action="water" data-id="${attr(p.id)}">+ Полив</button></div></div>
+    <div class="section-head"><h2>Фотоистория</h2><span class="pill">${p.photos?.length||0} из 12</span></div>
+    <p class="intro">Укажите дату, этап роста и заметку: так можно сравнивать цветение по сезонам. Личные фотографии не публикуются автоматически.</p>
+    <div class="photo-grid">${C.photoTimeline(p).map(photo=>`<div class="photo-tile">${picture(photo.id,p.name)}<div class="photo-info"><strong>${photo.day?dayLabel(photo.day):'Дата не указана'}</strong><small>${esc(photo.stage)}</small>${photo.note?`<small class="photo-note">${esc(photo.note)}</small>`:''}</div><div class="photo-tools"><button data-action="edit-photo" data-id="${attr(p.id)}" data-photo="${attr(photo.id)}">Описание</button><button data-action="share-photo" data-id="${attr(p.id)}" data-photo="${attr(photo.id)}">В альбом</button><button data-action="delete-photo" data-id="${attr(p.id)}" data-photo="${attr(photo.id)}" aria-label="Удалить фото">✕</button></div></div>`).join('')}</div>
+    <button class="btn btn-primary btn-block" data-action="add-photo" data-id="${attr(p.id)}" ${p.photos?.length>=12?'disabled':''}>+ Добавить фотографию</button>
+    ${(p.photos||[]).length>=2?`<button class="btn btn-outline btn-block" data-action="compare-photos" data-id="${attr(p.id)}">⇆ Сравнить два снимка</button>`:''}
+    ${savedComparisons(p)}
+    ${bloomCalendar(p)}
     <div class="section-head"><h2>Записи об уходе</h2></div>
     <div class="plant-actions"><button class="plant-action" data-action="log" data-kind="feed" data-id="${attr(p.id)}"><span>✧</span>Подкормка</button><button class="plant-action" data-action="log" data-kind="prune" data-id="${attr(p.id)}"><span>✂</span>Обрезка</button><button class="plant-action" data-action="log" data-kind="mulch" data-id="${attr(p.id)}"><span>❧</span>Мульча</button></div>
     ${history.length?history.slice(0,12).map(h=>`<div class="history-item"><strong>${esc(historyLabel(h.kind))}</strong><small>${dayLabel(h.day)}${h.note?' · '+esc(h.note):''}</small></div>`).join(''):`<div class="card muted tiny">Пока нет записей. Отмечайте проверки почвы и выполненные работы — здесь появится история.</div>`}
@@ -121,6 +204,7 @@ function calendarPage(){
   <div class="tip">☀ Сроки приблизительны и ориентированы на климат средней полосы. В тёплых и холодных регионах ориентируйтесь прежде всего на погоду, состояние грунта и фазу роста растения.</div>`;
 }
 function guidePage() {
+  if(selectedVariety && guideMode==='sort'){const found=allVarieties().find(v=>catalogKey(v)===selectedVariety);if(found)return varietyDetail(found);selectedVariety='';}
   if(article) return articlePage();
   const choices=[['care','Уход'],['sort','Сорта'],['problem','Что с кустом?']];
   return `${header()}<h1 class="page-title">Справочник</h1><p class="sub-title">Короткие практические советы по метельчатой гортензии.</p>
@@ -131,9 +215,31 @@ function guidePage() {
   <div class="source-note">Справочник адаптирован из приложенного пособия «Пособие по выращиванию метельчатой гортензии (Hydrangea paniculata)». Уход может отличаться в зависимости от сорта, возраста куста и климата.</div>`;
 }
 function varietiesView(){
-  const opts=['Все','Компактный','Ранний','Поздний','Высокий'];
-  return `<div class="filter-row" style="margin-top:0">${opts.map(x=>`<button class="filter ${varietyFilter===x?'selected':''}" data-action="variety-filter" data-filter="${attr(x)}">${x}</button>`).join('')}</div>
-    ${D.varieties.filter(v=>varietyFilter==='Все'||v.tag===varietyFilter||v.bloom===varietyFilter).map(v=>`<div class="variety"><div class="top"><h3>${esc(v.name)}</h3><span class="pill">${esc(v.tag)}</span></div><div class="meta">Высота: ${esc(v.height)}<br/>Соцветия: ${esc(v.color)}<br/>Начало цветения: ${esc(v.bloom.toLowerCase())}</div></div>`).join('')}`;
+  const opts=['Все','Мои сорта','Компактный','Ранний','Поздний','Высокий'];
+  const query=C.normalizedVarietyName(varietySearch);
+  const matched=allVarieties().filter(v=>(varietyFilter==='Все'||(varietyFilter==='Мои сорта'&&!!v.id)||v.tag===varietyFilter||v.bloom===varietyFilter) && (!query || C.normalizedVarietyName([v.name,v.color,v.tag,v.notes].join(' ')).includes(query)));
+  return `<div class="card"><h3>Фото-справочник сортов</h3><p class="intro">Сортовые фотографии из Wikimedia Commons загружаются по вашему запросу через интернет. В карточки можно добавить собственные фотографии — они останутся только на вашем телефоне.</p>
+    <button class="btn ${externalPhotosEnabled?'btn-outline':'btn-secondary'} btn-block" data-action="toggle-catalog-online" aria-pressed="${externalPhotosEnabled}">${externalPhotosEnabled?'Скрыть онлайн-фото':'Показать онлайн-фото'}</button>
+    <button class="btn btn-primary btn-block" data-action="add-variety" style="margin-top:9px">+ Добавить новый сорт</button></div>
+    <label class="form-field"><span>Найти сорт</span><input class="input" id="variety-search" placeholder="Название, окраска, особенности" maxlength="80" value="${attr(varietySearch)}" /></label>
+    <div class="filter-row">${opts.map(x=>`<button class="filter ${varietyFilter===x?'selected':''}" data-action="variety-filter" data-filter="${attr(x)}">${esc(x)}</button>`).join('')}</div>
+    ${matched.map(v=>`<article class="variety catalog-card">${catalogPicture(v)}<div class="catalog-body"><div class="top"><h3>${esc(v.name)}</h3><span class="pill">${v.id?'Мой сорт':esc(v.tag)}</span></div>
+      <div class="meta">Высота: ${esc(v.height||'Не указана')}<br/>Соцветия: ${esc(v.color||'Не указаны')}<br/>Цветение: ${esc(v.bloom==='Неизвестно'?'не указано':v.bloom.toLowerCase())}</div>
+      <button class="btn btn-outline btn-block" data-action="view-variety" data-id="${attr(catalogKey(v))}" style="margin-top:12px">Открыть карточку и фотографии →</button></div></article>`).join('')}
+    ${!matched.length?'<p class="intro">По вашему запросу сорта не найдены.</p>':''}`;
+}
+function varietyDetail(v){
+ const pic=catalogImage(v),key=catalogKey(v),count=data.plants.filter(p=>C.normalizedVarietyName(p.variety)===C.normalizedVarietyName(v.name)).length;
+ return `<div class="header-row"><button class="back" data-action="variety-back" aria-label="К сортам">←</button><span class="eyebrow">ФОТО-СПРАВОЧНИК · HYDRANGEA PANICULATA</span></div>
+ <h1 class="page-title">${esc(v.name)}</h1><div class="catalog-detail-photo">${catalogPicture(v)}</div>
+ <div class="card"><h3>Описание сорта</h3><p class="intro">Высота: ${esc(v.height||'Не указана')}<br/>Окраска: ${esc(v.color||'Не указана')}<br/>Срок цветения: ${esc(v.bloom||'Не указан')}<br/>Особенности: ${esc(v.tag||'Не указаны')}</p>${v.notes?`<p>${esc(v.notes)}</p>`:''}
+ <p class="muted tiny">${esc(pic.credit)}</p>
+ ${pic.kind==='commons'?`<button class="text-button" data-action="photo-source" data-id="${attr(key)}">Открыть источник фотографии и условия лицензии ↗</button>`:''}
+ <div class="btn-row" style="margin-top:15px"><button class="btn btn-primary" data-action="catalog-pick" data-id="${attr(key)}">${data.catalogPhotos[key]?'Заменить моё фото':'+ Добавить моё фото'}</button>
+ ${data.catalogPhotos[key]?`<button class="btn btn-danger" data-action="catalog-remove" data-id="${attr(key)}">Удалить моё фото</button>`:''}</div>
+ <p class="muted tiny">Личное фото привязано к сорту в справочнике, не публикуется в общем альбоме и не входит в JSON-копию как файл.</p></div>
+ <div class="card"><h3>Ваш сад · ${count} ${count===1?'куст':'кустов'}</h3><button class="btn btn-outline btn-block" data-action="add-plant-variety" data-id="${attr(key)}">+ Добавить куст этого сорта</button></div>
+ ${v.id?`<button class="btn btn-outline" data-action="edit-variety" data-id="${attr(v.id)}">Изменить описание сорта</button>`:''}`;
 }
 function problemsView(){return `<p class="intro">Выберите наиболее заметный признак. Подсказки не заменяют осмотр растения и не являются диагнозом.</p>
     ${D.problems.map(p=>`<button class="help-option" data-action="problem" data-id="${p.id}">${glyph(p.icon)}<span style="flex:1">${esc(p.label)}</span><span class="chevron">›</span></button>`).join('')}`;}
@@ -148,29 +254,156 @@ function articlePage(){
 function morePage(){
   return `${header()}<h1 class="page-title">Ещё</h1><p class="sub-title">Настройки, напоминания и сохранность данных.</p>
     <div class="card"><div class="setting"><div><strong>Ежедневное напоминание</strong><small>Уведомление примерно в 9:00: проверить задачи и влажность грунта.</small></div><button class="toggle ${reminderEnabled?'on':''}" role="switch" aria-checked="${reminderEnabled}" aria-label="Ежедневное напоминание" data-action="reminder"></button></div>
-    <div class="setting"><div><strong>Резервная копия сада</strong><small>Сохраните растения, историю и выполненные задачи в JSON-файл.</small></div><button class="btn btn-secondary" data-action="export">Сохранить</button></div>
+    <div class="setting"><div><strong>Резервная копия сада</strong><small>Сохраните растения, собственные сорта, историю и выполненные задачи в JSON-файл.</small></div><button class="btn btn-secondary" data-action="export">Сохранить</button></div>
     <div class="setting" style="border:0"><div><strong>Восстановить данные</strong><small>Загрузка резервной копии заменит текущие записи.</small></div><button class="btn btn-outline" data-action="import">Загрузить</button></div></div>
-    <div class="card"><div class="mini-label">О ПРИЛОЖЕНИИ</div><h3 style="margin:10px 0 7px">Гортензия · Мой сад</h3><p class="intro">Версия 1.0 · Для метельчатой гортензии (Hydrangea paniculata). Работает без интернета и регистрации. Записи сохраняются на этом устройстве. При удалении приложения записи могут пропасть — сохраняйте резервную копию.</p></div>
+    <div class="card"><div class="mini-label">О ПРИЛОЖЕНИИ</div><h3 style="margin:10px 0 7px">Гортензия · Мой сад</h3><p class="intro">Версия 1.5 · Для метельчатой гортензии (Hydrangea paniculata). Личный дневник работает без интернета. Фотографии хранятся на этом телефоне и не входят в JSON-копию. Общий альбом доступен только после подключения сервиса и публикации по вашему согласию; анонимный аккаунт общего альбома привязан к устройству.</p></div>
     <div class="source-note">Советы основаны на предоставленном пользователем пособии. Календарь служит напоминанием об осмотре, а не автоматической инструкцией к поливу или применению средств защиты.</div>`;
 }
+function galleryPage(){
+  return `${header()}<h1 class="page-title">Альбом сообщества 🌸</h1>
+  <p class="sub-title">Сравнивайте цветение и уход. Фотографии публикуются только по желанию владельца и после проверки модератором.</p>
+  <div class="card"><h3>Поделитесь результатом</h3><p class="intro">Откройте «Мой сад» → карточку куста → добавьте фото → «В альбом». Здесь нет личных сообщений, геолокации и публичных контактов.</p>
+  ${onlineAvailable?`<button class="btn btn-outline" data-action="gallery-refresh" ${galleryBusy?'disabled':''}>${galleryBusy?'Загрузка…':'Обновить альбом'}</button>`:
+  `<p class="intro">Общий альбом будет доступен после подключения владельцем приложения облачного хранилища. Личные фото уже можно сохранять без интернета.</p>`}</div>
+  ${galleryError?`<div class="source-note">${esc(galleryError)}</div>`:''}
+  ${galleryItems.map(item=>`<article class="card gallery-card">
+    ${item.url?`<img class="gallery-image" src="${attr(item.url)}" alt="Метельчатая гортензия сорта ${attr(item.variety||'не указан')}" loading="lazy" referrerpolicy="no-referrer"/>`:'<p class="intro">Фотография временно недоступна.</p>'}
+    <div class="row-line"><strong>${esc(item.nickname)}</strong><span class="pill">${esc(item.status==='pending'?'На проверке':item.variety||'Гортензия')}</span></div>
+    ${item.caption?`<p class="intro">${esc(item.caption)}</p>`:''}
+    <p class="muted tiny">${esc(item.variety||'Сорт не указан')} · ${esc((item.created_at||'').slice(0,10))}</p>
+    ${item.mine?`<button class="btn btn-outline" data-action="remove-shared" data-photo="${attr(item.id)}">Удалить публикацию</button>`:
+    `<button class="btn btn-outline" data-action="report-shared" data-photo="${attr(item.id)}">Пожаловаться</button>`}
+  </article>`).join('')}
+  ${onlineAvailable&&!galleryBusy&&!galleryItems.length&&!galleryError?'<p class="intro">Пока нет опубликованных фотографий. Новые фотографии сначала проверяет модератор.</p>':''}`;
+}
+async function refreshGallery(){
+  if(!onlineAvailable)return;
+  galleryBusy=true;galleryError='';render();
+  try {const result=await cloud('list');galleryItems=Array.isArray(result.items)?result.items:[];}
+  catch(e){galleryError=e.message||'Не удалось загрузить альбом';}
+  finally{galleryBusy=false;if(current==='gallery')render();}
+}
+function photoSheet(plantId,photoId){
+  const p=data.plants.find(x=>x.id===plantId && (x.photos||[]).includes(photoId));if(!p)return;
+  const m=C.photoMetadata(p.photoMeta?.[photoId]);
+  openSheet(`<h2 class="sheet-title">Фотография · ${esc(p.name)}</h2>${picture(photoId,p.name)}
+    <p class="sheet-description">Дата и этап роста нужны только для вашей фотоистории. Они не публикуются вместе со снимком.</p>
+    <form id="photo-form" data-id="${attr(plantId)}" data-photo="${attr(photoId)}">
+      <label class="form-field"><span>Дата снимка</span><input class="input" name="day" type="date" max="${today()}" value="${attr(m.day)}" /></label>
+      <label class="form-field"><span>Этап роста</span><select class="input" name="stage">${C.PHOTO_STAGES.map(x=>`<option value="${attr(x)}" ${x===m.stage?'selected':''}>${esc(x)}</option>`).join('')}</select></label>
+      <label class="form-field"><span>Наблюдения</span><textarea class="input" name="note" maxlength="180" rows="3" placeholder="Размер соцветий, оттенок, погода…">${esc(m.note)}</textarea></label>
+      <div class="btn-row"><button class="btn btn-primary" type="submit">Сохранить фотоисторию</button><button type="button" class="btn btn-outline" data-action="close">Отмена</button></div>
+    </form>`);
+}
+function compareSheet(plantId){
+  const p=data.plants.find(x=>x.id===plantId);if(!p||p.photos.length<2)return;
+  const options=C.photoTimeline(p);
+  comparePlantId=plantId;comparePhotos=[options[0].id,options[options.length-1].id];
+  openSheet(`<h2 class="sheet-title">До и после · ${esc(p.name)}</h2><p class="sheet-description">Выберите любые два снимка, чтобы сопоставить рост и цветение одного куста.</p>
+  <div class="compare-pickers"><label class="form-field"><span>Первый снимок</span><select class="input" data-compare="0">${options.map(photo=>`<option value="${attr(photo.id)}" ${photo.id===comparePhotos[0]?'selected':''}>${esc(photo.day?dayLabel(photo.day):'Без даты')} · ${esc(photo.stage)} · №${photo.index+1}</option>`).join('')}</select></label>
+  <label class="form-field"><span>Второй снимок</span><select class="input" data-compare="1">${options.map(photo=>`<option value="${attr(photo.id)}" ${photo.id===comparePhotos[1]?'selected':''}>${esc(photo.day?dayLabel(photo.day):'Без даты')} · ${esc(photo.stage)} · №${photo.index+1}</option>`).join('')}</select></label></div>
+  <div id="compare-result"></div><label class="form-field"><span>Название сравнения</span><input id="comparison-note" class="input" maxlength="180" placeholder="Например, цветение 2025 и 2026" /></label><div class="btn-row"><button class="btn btn-primary" data-action="save-comparison" data-id="${attr(plantId)}">Сохранить сравнение</button><button class="btn btn-outline" data-action="close">Закрыть</button></div>`);
+  updateComparison(p);
+}
+function updateComparison(p){
+  const target=overlay.querySelector('#compare-result');if(!target)return;
+  target.innerHTML=comparePhotos[0]===comparePhotos[1]?'<p class="source-note">Выберите два разных снимка.</p>':
+    `<div class="compare-grid">${comparePhotos.map((id,i)=>{const m=C.photoMetadata(p.photoMeta?.[id]);return `<div><div class="compare-label">${i===0?'ДО':'ПОСЛЕ'}</div>${picture(id,p.name)}<strong>${m.day?dayLabel(m.day):'Дата неизвестна'}</strong><small>${esc(m.stage)}</small>${m.note?`<p class="muted tiny">${esc(m.note)}</p>`:''}</div>`;}).join('')}</div>`;
+}
+function savedComparisons(p){
+  const items=p.comparisons||[];
+  return `<div class="section-head"><h2>Сохранённые сравнения</h2><span class="pill">${items.length}</span></div>
+    ${items.length?items.map(c=>`<div class="saved-comparison card"><div class="saved-heading"><strong>${esc(c.note||'Сравнение фотографий')}</strong><small>${c.created?dayLabel(c.created):'Без даты'}</small></div><div class="saved-thumbs">${picture(c.first,p.name)}${picture(c.second,p.name)}</div><div class="btn-row"><button class="btn btn-outline" data-action="view-comparison" data-id="${attr(p.id)}" data-compare-id="${attr(c.id)}">Открыть</button><button class="btn btn-danger" data-action="delete-comparison" data-id="${attr(p.id)}" data-compare-id="${attr(c.id)}">Удалить</button></div></div>`).join(''):'<p class="intro">Сохраните сравнение двух снимков, чтобы вернуться к нему позднее.</p>'}`;
+}
+function bloomCalendar(p){
+  const rows=C.bloomTimeline(p);
+  const currentYear=new Date().getFullYear();
+  return `<div class="section-head"><h2>Цветение по годам</h2><button class="aux" data-action="edit-bloom" data-id="${attr(p.id)}" data-year="${currentYear}">+ Записать</button></div>
+    <p class="intro">Отмечайте начало и конец цветения самостоятельно. Датированные фото с этапом «Цветение» показываются как наблюдения, но не заменяют даты начала и окончания.</p>
+    ${rows.length?rows.map(r=>`<div class="bloom-year card"><div class="saved-heading"><strong>${r.year} год</strong><button class="btn btn-outline" data-action="edit-bloom" data-id="${attr(p.id)}" data-year="${r.year}">Изменить</button></div>
+    <div class="bloom-range"><span>Начало: <b>${r.start?dayLabel(r.start):'не отмечено'}</b></span><span>Конец: <b>${r.end?dayLabel(r.end):'не отмечено'}</b></span></div>
+    ${r.start&&r.end?`<div class="bloom-duration">Продолжительность: ${C.daysSince(r.start,new Date(r.end+'T12:00:00'))+1} дн.</div>`:''}
+    ${r.observations?`<small>Фото цветения: ${r.observations}; первое — ${dayLabel(r.firstPhoto)}, последнее — ${dayLabel(r.lastPhoto)}</small>`:''}
+    ${r.note?`<p class="intro">${esc(r.note)}</p>`:''}</div>`).join(''):'<div class="card"><p class="intro">Записей о цветении пока нет. Добавьте дату начала или отметьте этап «Цветение» у фотографии.</p></div>'}`;
+}
+function bloomSheet(id,year){
+  const p=data.plants.find(x=>x.id===id);if(!p)return;
+  const y=Number(year),current=new Date().getFullYear();
+  if(!Number.isInteger(y)||y<1900||y>current)return;
+  const r=(p.bloomYears||[]).find(x=>x.year===y)||{year:y,start:'',end:'',note:''};
+  openSheet(`<h2 class="sheet-title">Цветение · ${esc(p.name)}</h2><p class="sheet-description">Запишите наблюдения за ${y} год. Не указывайте предполагаемую дату как фактическую.</p>
+  <form id="bloom-form" data-id="${attr(id)}" data-year="${y}">
+  <label class="form-field"><span>Начало цветения</span><input class="input" type="date" name="start" min="${y}-01-01" max="${y===current?today():y+'-12-31'}" value="${attr(r.start)}" /></label>
+  <label class="form-field"><span>Окончание цветения</span><input class="input" type="date" name="end" min="${y}-01-01" max="${y===current?today():y+'-12-31'}" value="${attr(r.end)}" /></label>
+  <label class="form-field"><span>Заметка</span><textarea class="input" maxlength="180" name="note" placeholder="Цвет, обилие соцветий, погода…">${esc(r.note)}</textarea></label>
+  <div class="btn-row"><button type="submit" class="btn btn-primary">Сохранить</button>${(p.bloomYears||[]).some(x=>x.year===y)?`<button type="button" class="btn btn-danger" data-action="delete-bloom" data-id="${attr(id)}" data-year="${y}">Удалить запись</button>`:''}</div></form>`);
+}
+function savedComparisonSheet(id,cmpId){
+  const p=data.plants.find(x=>x.id===id),c=p?.comparisons?.find(x=>x.id===cmpId);if(!c)return;
+  openSheet(`<h2 class="sheet-title">${esc(c.note||'Сравнение фотографий')}</h2><p class="sheet-description">Сохранено: ${c.created?dayLabel(c.created):'дата не указана'}</p>
+  <div class="compare-grid">${[c.first,c.second].map((photo,i)=>{const m=C.photoMetadata(p.photoMeta?.[photo]);return `<div><div class="compare-label">${i?'ПОСЛЕ':'ДО'}</div>${picture(photo,p.name)}<strong>${m.day?dayLabel(m.day):'Дата неизвестна'}</strong><small>${esc(m.stage)}</small>${m.note?`<p class="muted tiny">${esc(m.note)}</p>`:''}</div>`}).join('')}</div><button class="btn btn-outline btn-block" data-action="close">Закрыть</button>`);
+}
+function sharingSheet(plant, photo){
+  if(!onlineAvailable){toast('Владелец приложения ещё не подключил общий альбом');return;}
+  const p=data.plants.find(x=>x.id===plant && (x.photos||[]).includes(photo));if(!p)return;
+  uploadPlant=plant;uploadPhoto=photo;
+  openSheet(`<h2 class="sheet-title">Опубликовать фотографию?</h2>
+    ${picture(photo,p.name)}
+    <p class="sheet-description">Фото увидят другие пользователи после проверки модератором. Можно указать только вымышленное имя и сорт; местоположение и личные заметки не отправляются. Публикацию можно удалить с этого устройства.</p>
+    <form id="share-form"><label class="form-field"><span>Псевдоним (не настоящее имя) *</span><input class="input" name="nickname" maxlength="24" required placeholder="Например, Любитель цветов" /></label>
+    <label class="form-field"><span>Сорт</span><input class="input" name="variety" maxlength="60" value="${attr(p.variety)}" /></label>
+    <label class="form-field"><span>Описание цветения (не более 180 знаков)</span><textarea class="input" name="caption" maxlength="180" placeholder="Например, первое цветение в этом сезоне"></textarea></label>
+    <label class="form-field"><input type="checkbox" name="consent" required /> На снимке только растения, без людей, адресов, номеров и другой личной информации. Я согласен(на) опубликовать эту фотографию для просмотра другими пользователями.</label>
+    <div class="btn-row"><button type="submit" class="btn btn-primary">Отправить на проверку</button><button type="button" class="btn btn-outline" data-action="close">Отмена</button></div></form>`);
+}
 function render(){
-  main.innerHTML=current==='today'?todayPage():current==='plants'?(plantId?plantDetail():plantsPage()):current==='calendar'?calendarPage():current==='guide'?guidePage():morePage();
+  main.innerHTML=current==='today'?todayPage():current==='plants'?(plantId?plantDetail():plantsPage()):current==='calendar'?calendarPage():current==='guide'?guidePage():current==='gallery'?galleryPage():morePage();
   tabs.querySelectorAll('.tab').forEach(b=>{const active=b.dataset.tab===current;b.classList.toggle('active',active);b.setAttribute('aria-current',active?'page':'false');});
   if(current==='calendar') {const active=main.querySelector('.filter.selected');if(active)active.scrollIntoView({block:'nearest',inline:'center'});}
 }
 function openSheet(markup){overlay.innerHTML=`<div class="sheet" role="dialog" aria-modal="true"><div class="sheet-handle"></div>${markup}</div>`;overlay.classList.remove('hidden');}
 function closeSheet(){overlay.classList.add('hidden');overlay.innerHTML='';}
-function plantForm(id='') {
-  const p=data.plants.find(p=>p.id===id)||{name:'',variety:'',planted:'',place:'',notes:''};
+function plantForm(id='',draft=null) {
+  const p=draft||data.plants.find(p=>p.id===id)||{name:'',variety:'',planted:'',place:'',notes:''};
   openSheet(`<h2 class="sheet-title">${id?'Редактировать куст':'Новая гортензия 🌸'}</h2><p class="sheet-description">Заполните только то, что знаете. Остальное можно добавить позже.</p>
   <form id="plant-form" data-id="${attr(id)}">
     <label class="form-field"><span>Как назвать куст? *</span><input class="input" name="name" required maxlength="70" placeholder="Например, Гортензия у крыльца" value="${attr(p.name)}" /></label>
-    <label class="form-field"><span>Сорт</span><input class="input" name="variety" maxlength="80" list="known-varieties" placeholder="Например, Limelight" value="${attr(p.variety)}"/><datalist id="known-varieties">${D.varieties.map(v=>`<option value="${attr(v.name)}"></option>`).join('')}</datalist></label>
+    <label class="form-field"><span>Сорт</span><input class="input" name="variety" maxlength="80" list="known-varieties" placeholder="Например, Limelight" value="${attr(p.variety)}"/><datalist id="known-varieties">${allVarieties().map(v=>`<option value="${attr(v.name)}"></option>`).join('')}</datalist></label>
+    <button class="btn btn-outline" type="button" data-action="add-variety-from-plant" style="margin-bottom:16px">+ Добавить сорт в справочник</button>
     <label class="form-field"><span>Дата посадки</span><input class="input" name="planted" type="date" value="${attr(p.planted)}" /></label>
     <label class="form-field"><span>Место в саду</span><input class="input" name="place" maxlength="90" placeholder="У террасы, вдоль дорожки..." value="${attr(p.place)}" /></label>
     <label class="form-field"><span>Заметки</span><textarea class="input" name="notes" maxlength="400" rows="3" placeholder="Освещение, особенности, тип почвы...">${esc(p.notes)}</textarea></label>
     <div class="btn-row"><button class="btn btn-primary" type="submit">${id?'Сохранить изменения':'Добавить в сад'}</button><button class="btn btn-outline" type="button" data-action="close">Отмена</button></div>
   </form>`);
+}
+function varietySheet(id='',fromPlant=false,prefill='') {
+  const v=data.customVarieties.find(x=>x.id===id)||{name:prefill,height:'',color:'',bloom:'Неизвестно',tag:'Другой',notes:''};
+  editingVariety=id;returningToPlant=fromPlant;
+  const options=(items,selected)=>items.map(x=>`<option value="${attr(x)}" ${x===selected?'selected':''}>${esc(x)}</option>`).join('');
+  openSheet(`<h2 class="sheet-title">${id?'Изменить сорт':'Новый сорт гортензии 🌸'}</h2>
+  <p class="sheet-description">Добавьте сведения о сорте из этикетки питомника или собственных наблюдений. Эта запись личная и не появится в общем альбоме автоматически.</p>
+  <form id="variety-form" data-id="${attr(id)}">
+  <label class="form-field"><span>Название сорта *</span><input class="input" name="name" required maxlength="80" value="${attr(v.name)}" placeholder="Например, Pink Diamond" /></label>
+  <label class="form-field"><span>Высота взрослого куста</span><input class="input" name="height" maxlength="70" value="${attr(v.height)}" placeholder="Например, до 1,5 м" /></label>
+  <label class="form-field"><span>Цвет соцветий</span><input class="input" name="color" maxlength="100" value="${attr(v.color)}" placeholder="Белый → розовый" /></label>
+  <label class="form-field"><span>Срок цветения</span><select class="input" name="bloom">${options(C.BLOOM_TYPES,v.bloom)}</select></label>
+  <label class="form-field"><span>Особенность сорта</span><select class="input" name="tag">${options(C.VARIETY_TAGS,v.tag)}</select></label>
+  <label class="form-field"><span>Описание и заметки</span><textarea class="input" name="notes" maxlength="500" rows="3" placeholder="Особенности сорта, источник названия...">${esc(v.notes)}</textarea></label>
+  <div class="btn-row"><button class="btn btn-primary" type="submit">Сохранить сорт</button><button class="btn btn-outline" type="button" data-action="cancel-variety">Отмена</button></div></form>`);
+}
+function capturePlantDraft(form){
+  const v=new FormData(form);return {name:String(v.get('name')||''),variety:String(v.get('variety')||''),planted:String(v.get('planted')||''),place:String(v.get('place')||''),notes:String(v.get('notes')||'')};
+}
+function cancelVariety(){
+  if(returningToPlant&&plantDraft){const draft=plantDraft;plantDraft=null;returningToPlant=false;plantForm(draft.id,draft);}
+  else {closeSheet();returningToPlant=false;go('guide');}
+}
+function confirmVarietyDelete(id){
+  const v=data.customVarieties.find(x=>x.id===id);if(!v)return;
+  const n=data.plants.filter(p=>C.normalizedVarietyName(p.variety)===C.normalizedVarietyName(v.name)).length;
+  openSheet(`<h2 class="sheet-title">Удалить сорт «${esc(v.name)}»?</h2>
+    <p class="sheet-description">Сорт исчезнет из личного справочника. ${n?`У ${n} кустов название сорта останется в карточке, но сведения из справочника больше не будут доступны.`:'Карточки растений и фотографии не пострадают.'}</p>
+    <div class="btn-row"><button class="btn btn-danger" data-action="delete-variety-confirm" data-id="${attr(id)}">Удалить сорт</button><button class="btn btn-outline" data-action="close">Отмена</button></div>`);
 }
 function moistureSheet(id){const p=data.plants.find(x=>x.id===id);if(!p)return;
   openSheet(`<h2 class="sheet-title">Проверка почвы</h2><p class="sheet-description">${esc(p.name)} · проверьте грунт на глубине нескольких сантиметров.</p>
@@ -215,8 +448,17 @@ if(window.GardenAndroid){try {reminderEnabled=window.GardenAndroid.getReminderSt
 else {reminderEnabled=localStorage.getItem('garden_demo_reminder')==='yes';}
 
 main.addEventListener('click',event=>handle(event));
-tabs.addEventListener('click',e=>{const b=e.target.closest('[data-tab]');if(b)go(b.dataset.tab);});
+tabs.addEventListener('click',e=>{const b=e.target.closest('[data-tab]');if(b){go(b.dataset.tab);if(b.dataset.tab==='gallery')refreshGallery();}});
 overlay.addEventListener('click',e=>{if(e.target===overlay)closeSheet();else handle(e);});
+overlay.addEventListener('change',e=>{
+  const selected=e.target.closest('[data-compare]');if(!selected)return;
+  comparePhotos[Number(selected.dataset.compare)]=selected.value;
+  const p=data.plants.find(x=>x.id===plantId);if(p)updateComparison(p);
+});
+main.addEventListener('submit',e=>{
+  if(e.target.id!=='plant-search-form')return;
+  e.preventDefault();plantQuery=C.safeString(new FormData(e.target).get('query'),80);render();
+});
 document.getElementById('backup-file').addEventListener('change',async e=>{
   const f=e.target.files?.[0];if(!f)return;
   if(f.size>1_000_000){toast('Файл слишком большой');return;}
@@ -226,15 +468,78 @@ function handle(e){
   const button=e.target.closest('[data-action]');if(!button)return;
   const act=button.dataset.action,id=button.dataset.id;
   switch(act){
+    case 'gallery-refresh':refreshGallery();break;
+    case 'plant-filter':plantFilter=button.dataset.filter;render();break;
+    case 'clear-plant-search':plantQuery='';plantFilter='Все';render();break;
+    case 'edit-photo':photoSheet(id,button.dataset.photo);break;
+    case 'compare-photos':compareSheet(id);break;
+    case 'save-comparison':{
+      const p=data.plants.find(x=>x.id===id);
+      if(!p||id!==comparePlantId||comparePhotos[0]===comparePhotos[1]||!comparePhotos.every(x=>p.photos.includes(x))){toast('Выберите два разных снимка');break;}
+      p.comparisons=p.comparisons||[];
+      if(p.comparisons.length>=100){toast('Достигнут лимит сравнений');break;}
+      p.comparisons.push({id:'cmp-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,11),first:comparePhotos[0],second:comparePhotos[1],created:today(),note:C.safeString(overlay.querySelector('#comparison-note')?.value,180)});
+      save();closeSheet();go('plants',{plant:id});toast('Сравнение сохранено');break;
+    }
+    case 'view-comparison':savedComparisonSheet(id,button.dataset.compareId);break;
+    case 'delete-comparison':{
+      const p=data.plants.find(x=>x.id===id);if(!p)break;
+      p.comparisons=(p.comparisons||[]).filter(x=>x.id!==button.dataset.compareId);
+      save();render();toast('Сравнение удалено');break;
+    }
+    case 'edit-bloom':bloomSheet(id,button.dataset.year);break;
+    case 'delete-bloom':{
+      const p=data.plants.find(x=>x.id===id);if(!p)break;
+      p.bloomYears=(p.bloomYears||[]).filter(x=>x.year!==Number(button.dataset.year));
+      save();closeSheet();go('plants',{plant:id});toast('Запись удалена');break;
+    }
+    case 'go-gallery':go('gallery');refreshGallery();break;
+    case 'add-photo':
+      if(!window.GardenAndroid){toast('Добавление фотографий доступно в Android-приложении');break;}
+      window.GardenAndroid.pickPhoto(id);break;
+    case 'delete-photo':{
+      const p=data.plants.find(x=>x.id===id),photo=button.dataset.photo;
+      if(!p||!(p.photos||[]).includes(photo))break;
+      p.photos=p.photos.filter(x=>x!==photo);if(p.photoMeta)delete p.photoMeta[photo];p.comparisons=(p.comparisons||[]).filter(x=>x.first!==photo&&x.second!==photo);save();
+      if(window.GardenAndroid)window.GardenAndroid.deleteLocalPhoto(photo);
+      render();toast('Локальная фотография удалена. Опубликованное фото удаляется отдельно.');break;
+    }
+    case 'share-photo':sharingSheet(id,button.dataset.photo);break;
+    case 'remove-shared':{
+      if(!confirm('Удалить опубликованную фотографию и файл из общего альбома?'))break;
+      cloud('remove',{id:button.dataset.photo}).then(()=>{toast('Публикация удалена');refreshGallery();}).catch(e=>toast(e.message));break;
+    }
+    case 'report-shared':{
+      if(!confirm('Отправить жалобу модератору на эту фотографию?'))break;
+      cloud('report',{id:button.dataset.photo}).then(()=>toast('Жалоба отправлена')).catch(e=>toast(e.message));break;
+    }
     case 'open-settings':go('more');break;
     case 'go-plants':go('plants');break;
     case 'go-guide':go('guide');break;
     case 'open-plant':go('plants',{plant:id});break;
     case 'add-plant':plantForm();break;
     case 'edit-plant':plantForm(id);break;
+    case 'add-variety':plantDraft=null;varietySheet();break;
+    case 'add-variety-from-plant':{
+      const form=overlay.querySelector('#plant-form');if(!form)break;
+      plantDraft={...capturePlantDraft(form),id:form.dataset.id};
+      varietySheet('',true,plantDraft.variety);break;
+    }
+    case 'edit-variety':plantDraft=null;varietySheet(id);break;
+    case 'cancel-variety':cancelVariety();break;
+    case 'delete-variety':confirmVarietyDelete(id);break;
+    case 'delete-variety-confirm':{
+      if(data.catalogPhotos[id]){window.GardenAndroid?.deleteLocalPhoto(data.catalogPhotos[id]);delete data.catalogPhotos[id];}
+      selectedVariety='';data.customVarieties=data.customVarieties.filter(v=>v.id!==id);
+      save();closeSheet();guideMode='sort';varietyFilter='Мои сорта';go('guide');toast('Сорт удалён; записи кустов сохранены');break;
+    }
     case 'close':closeSheet();break;
     case 'delete-plant':confirmation(id);break;
-    case 'delete-confirm':data.plants=data.plants.filter(p=>p.id!==id);save();closeSheet();go('plants');toast('Куст удалён');break;
+    case 'delete-confirm':{
+      const p=data.plants.find(x=>x.id===id);
+      if(p&&window.GardenAndroid)(p.photos||[]).forEach(photo=>window.GardenAndroid.deleteLocalPhoto(photo));
+      data.plants=data.plants.filter(p=>p.id!==id);save();closeSheet();go('plants');toast('Куст удалён; общие публикации удаляются отдельно');break;
+    }
     case 'moisture':moistureSheet(id);break;
     case 'moisture-dry':record(id,'moisture',today(),'Почва сухая');toast('Проверьте, нужен ли полив');break;
     case 'moisture-moist':record(id,'moisture',today(),'Почва влажная, полив не нужен');break;
@@ -245,7 +550,24 @@ function handle(e){
       save();render();break;
     }
     case 'month':month=Number(button.dataset.month);render();break;
-    case 'guide-mode':guideMode=id;article='';render();break;
+    case 'guide-mode':guideMode=id;article='';selectedVariety='';render();break;
+    case 'toggle-catalog-online':externalPhotosEnabled=!externalPhotosEnabled;render();break;
+    case 'view-variety':if(isCatalogKey(id)){selectedVariety=id;render();window.scrollTo(0,0);}break;
+    case 'variety-back':selectedVariety='';go('guide');break;
+    case 'catalog-pick':if(!isCatalogKey(id))break;
+      if(window.GardenAndroid)window.GardenAndroid.pickPhoto('catalog:'+id);
+      else toast('Добавление фотографии доступно в Android-приложении');break;
+    case 'catalog-remove':if(!isCatalogKey(id))break;
+      if(data.catalogPhotos[id]){window.GardenAndroid?.deleteLocalPhoto(data.catalogPhotos[id]);delete data.catalogPhotos[id];save();render();}break;
+    case 'photo-source':{
+      const v=allVarieties().find(v=>catalogKey(v)===id);
+      if(v?.photoSource && window.GardenAndroid?.openPhotoSource)window.GardenAndroid.openPhotoSource(v.photoSource);
+      else toast('Источник фотографии указан в файле PHOTO_CREDITS.md');break;
+    }
+    case 'add-plant-variety':{
+      const v=allVarieties().find(v=>catalogKey(v)===id);
+      if(v)plantForm('',{name:'',variety:v.name,planted:'',place:'',notes:''});break;
+    }
     case 'guide-article':go('guide',{article:id});break;
     case 'problem':go('guide',{article:id});break;
     case 'variety-filter':varietyFilter=button.dataset.filter;render();break;
@@ -257,8 +579,69 @@ function handle(e){
     case 'import':startImport();break;
   }
 }
+main.addEventListener('change',e=>{
+  if(e.target?.id==='variety-search'){varietySearch=e.target.value.slice(0,80);render();}
+});
+main.addEventListener('keydown',e=>{
+  if(e.target?.id==='variety-search'&&e.key==='Enter'){e.preventDefault();varietySearch=e.target.value.slice(0,80);render();}
+});
 overlay.addEventListener('submit',e=>{
   e.preventDefault();const form=e.target,inputs=new FormData(form);
+  if(form.id==='bloom-form'){
+    const p=data.plants.find(x=>x.id===form.dataset.id),year=Number(form.dataset.year);
+    if(!p)return;
+    const start=String(inputs.get('start')||''),end=String(inputs.get('end')||'');
+    if((start&&(!C.parseDay(start)||!start.startsWith(year+'-')||start>today()))||(end&&(!C.parseDay(end)||!end.startsWith(year+'-')||end>today()))||(start&&end&&start>end)){
+      toast('Проверьте даты начала и окончания цветения');return;
+    }
+    const note=C.safeString(inputs.get('note'),180);
+    if(!start&&!end&&!note){toast('Укажите дату или заметку');return;}
+    p.bloomYears=(p.bloomYears||[]).filter(x=>x.year!==year);
+    p.bloomYears.push({year,start,end,note});p.bloomYears.sort((a,b)=>b.year-a.year);
+    save();closeSheet();go('plants',{plant:p.id});toast('Календарь цветения сохранён');return;
+  }
+  if(form.id==='photo-form'){
+    const p=data.plants.find(x=>x.id===form.dataset.id);
+    if(!p || !(p.photos||[]).includes(form.dataset.photo))return;
+    const day=String(inputs.get('day')||'');
+    if(day && (!C.parseDay(day)||day>today())){toast('Дата снимка должна быть не позднее сегодняшней');return;}
+    p.photoMeta=p.photoMeta||{};
+    p.photoMeta[form.dataset.photo]=C.photoMetadata({day,stage:inputs.get('stage'),note:inputs.get('note')});
+    save();closeSheet();go('plants',{plant:p.id});toast('Фотоистория сохранена');return;
+  }
+  if(form.id==='share-form'){
+    const nickname=C.safeString(inputs.get('nickname'),24),variety=C.safeString(inputs.get('variety'),60),caption=C.safeString(inputs.get('caption'),180);
+    if(!nickname||!inputs.get('consent')){toast('Нужны псевдоним и согласие');return;}
+    const btn=form.querySelector('button[type=submit]');if(btn){btn.disabled=true;btn.textContent='Отправка…';}
+    cloud('upload',{photoId:uploadPhoto,nickname,variety,caption,consent:true}).then(()=>{
+      closeSheet();toast('Фотография отправлена на проверку');go('gallery');refreshGallery();
+    }).catch(err=>{toast('Не удалось отправить: '+err.message);if(btn){btn.disabled=false;btn.textContent='Отправить на проверку';}});
+    return;
+  }
+  if(form.id==='variety-form'){
+    const name=C.safeString(inputs.get('name'),80);
+    if(!name){toast('Введите название сорта');return;}
+    const id=form.dataset.id;
+    if(varietyExists(name,id)){toast('Такой сорт уже есть в справочнике');return;}
+    const existing=data.customVarieties.find(v=>v.id===id);
+    if(!existing&&data.customVarieties.length>=100){toast('Достигнут лимит: 100 собственных сортов');return;}
+    const raw={id:id||'v-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,11),name,
+      height:inputs.get('height'),color:inputs.get('color'),bloom:inputs.get('bloom'),tag:inputs.get('tag'),notes:inputs.get('notes')};
+    try{
+      const clean=C.sanitizeVariety(raw);
+      if(existing){
+        const oldName=existing.name;
+        Object.assign(existing,clean);
+        if(C.normalizedVarietyName(oldName)!==C.normalizedVarietyName(clean.name))
+          data.plants.forEach(p=>{if(C.normalizedVarietyName(p.variety)===C.normalizedVarietyName(oldName))p.variety=clean.name;});
+      }else data.customVarieties.push(clean);
+      save();closeSheet();
+      if(returningToPlant&&plantDraft){const draft={...plantDraft,variety:clean.name};plantDraft=null;returningToPlant=false;plantForm(draft.id,draft);}
+      else {guideMode='sort';varietyFilter='Мои сорта';go('guide');}
+      toast('Сорт сохранён в личном справочнике');
+    }catch(err){toast(err.message||'Не удалось сохранить сорт');}
+    return;
+  }
   if(form.id==='plant-form'){
     const name=C.safeString(inputs.get('name'),70);if(!name){toast('Введите название куста');return;}
     const id=form.dataset.id;let p=data.plants.find(x=>x.id===id);

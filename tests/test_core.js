@@ -88,4 +88,357 @@ test('Стартовая страница приложения рендерит�
   assert.match(elems.main.innerHTML,/Куст у дома/);
   assert.equal(JSON.parse(stored['gortenziya_moy_sad_v1']).plants.length,1);
 });
+test('Фото в резервной копии: только локальные UUID, максимум 12',()=>{
+  const valid='01234567-89ab-4cde-8f01-234567890abc';
+  const backup=C.sanitizeBackup({version:1,plants:[{id:'p',name:'Гортензия',photos:[valid,'../evil.jpg','<script>']}],completed:[]});
+  assert.equal(backup.plants[0].photos.length,1);
+  assert.equal(backup.plants[0].photos[0],valid);
+  assert.equal(backup.plants[0].photos.includes('../evil.jpg'),false);
+});
+test('Старые копии 1.0/1.1 импортируются с пустым каталогом новых сортов',()=>{
+  const old=C.sanitizeBackup({version:1,plants:[{id:'p',name:'Куст',variety:'Bobo'}],completed:[]});
+  assert.deepEqual(old.customVarieties,[]);
+  assert.equal(old.plants[0].variety,'Bobo');
+});
+test('Новые сорта проходят проверку и остаются в резервной копии',()=>{
+  const v={id:'v-abcdefgh-12345678',name:'Pink Diamond',height:'до 1,5 м',color:'Белый → розовый',bloom:'Поздний',tag:'Высокий',notes:'Наблюдения'};
+  const b=C.sanitizeBackup({version:1,plants:[{id:'p',name:'Куст',variety:v.name}],completed:[],customVarieties:[v]});
+  assert.equal(b.customVarieties[0].color,'Белый → розовый');
+  assert.equal(b.plants[0].variety,'Pink Diamond');
+  assert.equal(b.customVarieties[0].notes,'Наблюдения');
+  assert.equal(b.customVarieties[0].evil,undefined);
+});
+test('Повторные сорта, подозрительные ID и превышение лимита блокируются',()=>{
+  const good={id:'v-abcdefgh-12345678',name:'New Rose'};
+  assert.throws(()=>C.sanitizeVariety({...good,id:'../private'}));
+  assert.throws(()=>C.sanitizeBackup({version:1,plants:[],completed:[],customVarieties:[good,{...good,id:'v-abcdefgh-87654321',name:'  NEW   rose ' }]}));
+  assert.throws(()=>C.sanitizeBackup({version:1,plants:[],completed:[],customVarieties:Array.from({length:101},(_,i)=>({...good,id:'v-'+String(i).padStart(10,'0'),name:'Новый сорт '+i}))}));
+  assert.equal(C.sanitizeVariety({...good,bloom:'<script>',tag:'other',notes:'N'.repeat(900)}).notes.length,500);
+});
+test('Интерфейс позволяет добавить и изменить свой сорт, а затем удалить его',()=>{
+  const stored={};
+  const ctx={window:{GardenCore:C},console,Date,Math,JSON,URL,Blob,setTimeout:()=>1,clearTimeout:()=>{},
+    localStorage:{getItem:k=>stored[k]||null,setItem:(k,v)=>{stored[k]=v;}},
+    FormData:class {constructor(form){this.values=form.values;} get(key){return Object.hasOwn(this.values,key)?this.values[key]:'';}},
+  };
+  class El{
+    constructor(){this.innerHTML='';this.classList={toggle:()=>{},add:()=>{},remove:()=>{},contains:()=>true};this.dataset={};this.handlers={};}
+    addEventListener(name,fn){this.handlers[name]=fn;}
+    querySelectorAll(){return [new El(),new El(),new El()];}
+    querySelector(){return null;}
+    setAttribute(){}
+  }
+  const elems={main:new El(),overlay:new El(),tabs:new El(),toast:new El(),'backup-file':new El()};
+  ctx.document={getElementById:id=>elems[id]};ctx.window.scrollTo=()=>{};
+  vm.createContext(ctx);
+  vm.runInContext(fs.readFileSync(path.join(root,'content.js'),'utf8'),ctx);
+  vm.runInContext(fs.readFileSync(path.join(root,'app.js'),'utf8'),ctx);
+  const click=(el, action, id='',more={})=>el.handlers.click({target:{closest:()=>({dataset:{action,id,...more}})}});
+  elems.tabs.handlers.click({target:{closest:()=>({dataset:{tab:'guide'}})}});
+  click(elems.main,'guide-mode','sort');
+  assert.match(elems.main.innerHTML,/Добавить новый сорт/);
+  click(elems.main,'add-variety');
+  assert.match(elems.overlay.innerHTML,/Новый сорт гортензии/);
+  const form=(id,values)=>elems.overlay.handlers.submit({preventDefault:()=>{},target:{id:'variety-form',dataset:{id},values}});
+  form('',{name:'Pink Diamond',height:'до 1,5 м',color:'Белый → розовый',bloom:'Поздний',tag:'Высокий',notes:'Мой опыт'});
+  let state=JSON.parse(stored['gortenziya_moy_sad_v1']);
+  assert.equal(state.customVarieties.length,1);
+  assert.match(elems.main.innerHTML,/Pink Diamond/);
+  const id=state.customVarieties[0].id;
+  click(elems.main,'edit-variety',id);
+  form(id,{name:'Pink Diamond II',height:'до 2 м',color:'Розовый',bloom:'Ранний',tag:'Другой',notes:'Обновлено'});
+  state=JSON.parse(stored['gortenziya_moy_sad_v1']);
+  assert.equal(state.customVarieties[0].name,'Pink Diamond II');
+  assert.equal(state.customVarieties[0].height,'до 2 м');
+  // Нельзя дублировать встроенный сорт.
+  click(elems.main,'add-variety');form('',{name:'Limelight',tag:'Другой',bloom:'Неизвестно'});
+  assert.equal(JSON.parse(stored['gortenziya_moy_sad_v1']).customVarieties.length,1);
+  click(elems.overlay,'cancel-variety');
+  click(elems.main,'delete-variety',id);
+  assert.match(elems.overlay.innerHTML,/Удалить сорт/);
+  click(elems.overlay,'delete-variety-confirm',id);
+  assert.equal(JSON.parse(stored['gortenziya_moy_sad_v1']).customVarieties.length,0);
+});
+test('Переименование своего сорта обновляет связанные кусты, удаление не стирает их данные',()=>{
+  const id='v-abcd1234-efgh5678';
+  const stored={'gortenziya_moy_sad_v1':JSON.stringify({version:1,plants:[{id:'p1',name:'У дома',variety:' Pink Diamond ',photos:[]},{id:'p2',name:'У забора',variety:'Bobo',photos:[]}],completed:[],customVarieties:[{id,name:'Pink Diamond',height:'',color:'',bloom:'Ранний',tag:'Другой',notes:''}]})};
+  const ctx={window:{GardenCore:C},console,Date,Math,JSON,URL,Blob,setTimeout:()=>1,clearTimeout:()=>{},
+    localStorage:{getItem:k=>stored[k]||null,setItem:(k,v)=>{stored[k]=v;}},
+    FormData:class {constructor(form){this.values=form.values;} get(key){return this.values[key]||'';}},
+  };
+  class El{constructor(){this.innerHTML='';this.classList={toggle:()=>{},add:()=>{},remove:()=>{},contains:()=>true};this.dataset={};this.handlers={};}
+    addEventListener(name,fn){this.handlers[name]=fn;}querySelectorAll(){return [];}querySelector(){return null;}setAttribute(){}
+  }
+  const elems={main:new El(),overlay:new El(),tabs:new El(),toast:new El(),'backup-file':new El()};
+  ctx.document={getElementById:id=>elems[id]};ctx.window.scrollTo=()=>{};vm.createContext(ctx);
+  vm.runInContext(fs.readFileSync(path.join(root,'content.js'),'utf8'),ctx);vm.runInContext(fs.readFileSync(path.join(root,'app.js'),'utf8'),ctx);
+  const click=(el,action,vid)=>el.handlers.click({target:{closest:()=>({dataset:{action,id:vid}})}});
+  click(elems.main,'add-variety'); // Добавление открывает только форму; редактирование работает из неё независимо.
+  click(elems.overlay,'cancel-variety');
+  elems.tabs.handlers.click({target:{closest:()=>({dataset:{tab:'guide'}})}});
+  click(elems.main,'guide-mode','sort');
+  click(elems.main,'edit-variety',id);
+  elems.overlay.handlers.submit({preventDefault:()=>{},target:{id:'variety-form',dataset:{id},values:{name:'Pink Diamond II',bloom:'Средний',tag:'Другой'}}});
+  let state=JSON.parse(stored['gortenziya_moy_sad_v1']);
+  assert.equal(state.plants[0].variety,'Pink Diamond II');
+  assert.equal(state.plants[1].variety,'Bobo');
+  click(elems.main,'delete-variety',id);click(elems.overlay,'delete-variety-confirm',id);
+  state=JSON.parse(stored['gortenziya_moy_sad_v1']);
+  assert.equal(state.plants.length,2);
+  assert.equal(state.plants[0].variety,'Pink Diamond II');
+});
+test('Добавление сорта из формы куста сохраняет незавершённые поля',()=>{
+  const stored={};
+  const ctx={window:{GardenCore:C},console,Date,Math,JSON,URL,Blob,setTimeout:()=>1,clearTimeout:()=>{},
+    localStorage:{getItem:k=>stored[k]||null,setItem:(k,v)=>{stored[k]=v;}},
+    FormData:class {constructor(form){this.values=form.values;} get(key){return this.values[key]||'';}},
+  };
+  class El{
+    constructor(){this.innerHTML='';this.classList={toggle:()=>{},add:()=>{},remove:()=>{},contains:()=>true};this.dataset={};this.handlers={};}
+    addEventListener(name,fn){this.handlers[name]=fn;}
+    querySelectorAll(){return [];}
+    querySelector(selector){if(selector==='#plant-form')return {dataset:{id:''},values:{name:'У веранды',variety:'Пинк Даймонд',planted:'2026-04-25',place:'У веранды',notes:'Полутень'}};return null;}
+    setAttribute(){}
+  }
+  const elems={main:new El(),overlay:new El(),tabs:new El(),toast:new El(),'backup-file':new El()};
+  ctx.document={getElementById:id=>elems[id]};ctx.window.scrollTo=()=>{};
+  vm.createContext(ctx);vm.runInContext(fs.readFileSync(path.join(root,'content.js'),'utf8'),ctx);
+  vm.runInContext(fs.readFileSync(path.join(root,'app.js'),'utf8'),ctx);
+  const click=(el,action)=>el.handlers.click({target:{closest:()=>({dataset:{action}})}});
+  click(elems.main,'add-plant');click(elems.overlay,'add-variety-from-plant');
+  assert.match(elems.overlay.innerHTML,/Пинк Даймонд/);
+  elems.overlay.handlers.submit({preventDefault:()=>{},target:{id:'variety-form',dataset:{id:''},values:{name:'Pink Diamond',bloom:'Средний',tag:'Другой'}}});
+  assert.match(elems.overlay.innerHTML,/У веранды/);
+  assert.match(elems.overlay.innerHTML,/Pink Diamond/);
+  assert.match(elems.overlay.innerHTML,/Полутень/);
+});
+test('v1.3: новые и старые фотографии сортируются по дате, при совпадении — по порядку',()=>{
+  const a='01234567-89ab-4cde-8f01-234567890abc',b='11234567-89ab-4cde-8f01-234567890abc',c='21234567-89ab-4cde-8f01-234567890abc';
+  const p={photos:[a,b,c],photoMeta:{[a]:{day:'2026-07-11',stage:'Цветение',note:'Первое цветение'},[b]:{day:'2026-04-01',stage:'Рост побегов',note:'Весна'}}};
+  assert.deepEqual(C.photoTimeline(p).map(x=>x.id),[c,b,a]); // Старые снимки без даты первыми.
+  assert.equal(C.photoTimeline(p)[2].note,'Первое цветение');
+});
+test('v1.3: история фото сохраняется в копии, невалидные даты и этапы отбрасываются',()=>{
+  const valid='01234567-89ab-4cde-8f01-234567890abc',other='11234567-89ab-4cde-8f01-234567890abc';
+  const backup=C.sanitizeBackup({version:1,plants:[{id:'p',name:'Гортензия',photos:[valid,other,valid],photoMeta:{
+    [valid]:{day:'2026-08-12',stage:'Цветение',note:'n'.repeat(800),evil:'bad'},
+    [other]:{day:'2026-02-30',stage:'<script>',note:'Зимний вид'},
+    '31234567-89ab-4cde-8f01-234567890abc':{note:'лишнее фото'}
+  }}],completed:[]});
+  const p=backup.plants[0];
+  assert.deepEqual(p.photos,[valid,other]);
+  assert.equal(p.photoMeta[valid].note.length,180);
+  assert.equal(p.photoMeta[valid].stage,'Цветение');
+  assert.equal(p.photoMeta[valid].evil,undefined);
+  assert.equal(p.photoMeta[other].day,'');
+  assert.equal(p.photoMeta[other].stage,'Не указана');
+  assert.equal(Object.keys(p.photoMeta).length,2);
+});
+test('v1.3: поиск по названию, сорту и месту не теряет длинные записи',()=>{
+  const p=[{name:'А'.repeat(70),variety:'Limelight',place:'У дорожки',photos:[],lastCheck:''},
+    {name:'Другой',variety:'Bobo',place:'За домом',photos:['id'],lastCheck:'2026-08-12'}];
+  assert.equal(C.filterPlants(p,'limelight').length,1);
+  assert.equal(C.filterPlants(p,'дорожки').length,1);
+  assert.equal(C.filterPlants(p,'bobo','С фотографиями').length,1);
+  assert.equal(C.filterPlants(p,'limelight','С фотографиями').length,0);
+  assert.equal(C.filterPlants(p,'','Проверить почву').length,2); // Давно не проверяли оба куста.
+  assert.equal(C.filterPlants(p,'нет такого названия').length,0);
+});
+test('v1.3: фото с опасным вводом экранируются в визуальном дневнике',()=>{
+  const photo='01234567-89ab-4cde-8f01-234567890abc',stored={};
+  stored['gortenziya_moy_sad_v1']=JSON.stringify({version:1,completed:[],plants:[{id:'p',name:'Куст',variety:'Limelight',photos:[photo],photoMeta:{[photo]:{day:'2026-08-12',stage:'Цветение',note:'<img src=x onerror=alert(1)>'}}}]});
+  const ctx={window:{GardenCore:C},console,Date,Math,JSON,URL,Blob,setTimeout:()=>1,clearTimeout:()=>{},
+    localStorage:{getItem:k=>stored[k]||null,setItem:(k,v)=>{stored[k]=v;}},
+    FormData:class{constructor(form){this.values=form.values||{};}get(key){return this.values[key]||'';}},
+  };
+  class El{
+    constructor(){this.innerHTML='';this.classList={toggle:()=>{},add:()=>{},remove:()=>{},contains:()=>true};this.dataset={};this.handlers={};}
+    addEventListener(name,fn){this.handlers[name]=fn;}
+    querySelectorAll(){return [new El(),new El(),new El()];}
+    querySelector(){return null;}
+    setAttribute(){}
+    scrollIntoView(){}
+  }
+  const elems={main:new El(),overlay:new El(),tabs:new El(),toast:new El(),'backup-file':new El()};
+  ctx.document={getElementById:id=>elems[id]};ctx.window.scrollTo=()=>{};
+  vm.createContext(ctx);vm.runInContext(fs.readFileSync(path.join(root,'content.js'),'utf8'),ctx);
+  vm.runInContext(fs.readFileSync(path.join(root,'app.js'),'utf8'),ctx);
+  elems.tabs.handlers.click({target:{closest:()=>({dataset:{tab:'plants'}})}});
+  elems.main.handlers.click({target:{closest:()=>({dataset:{action:'open-plant',id:'p'}})}});
+  assert.match(elems.main.innerHTML,/&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.doesNotMatch(elems.main.innerHTML,/<img src=x onerror=alert\(1\)>/);
+  assert.match(elems.main.innerHTML,/Описание/);
+});
+
+test('v1.3: поиск и фильтры сада работают в интерфейсе',()=>{
+  const stored={};
+  stored['gortenziya_moy_sad_v1']=JSON.stringify({version:1,completed:[],plants:[
+    {id:'p1',name:'Розовая',variety:'Pink Diamond',place:'У калитки',photos:[]},
+    {id:'p2',name:'Белая',variety:'Limelight',place:'У дома',photos:['01234567-89ab-4cde-8f01-234567890abc']}
+  ]});
+  const ctx={window:{GardenCore:C},console,Date,Math,JSON,URL,Blob,setTimeout:()=>1,clearTimeout:()=>{},
+    localStorage:{getItem:k=>stored[k]||null,setItem:(k,v)=>{stored[k]=v;}},
+    FormData:class{constructor(form){this.values=form.values||{};}get(key){return this.values[key]||'';}},
+  };
+  class El{
+    constructor(){this.innerHTML='';this.classList={toggle:()=>{},add:()=>{},remove:()=>{},contains:()=>true};this.dataset={};this.handlers={};}
+    addEventListener(name,fn){this.handlers[name]=fn;}
+    querySelectorAll(){return [new El(),new El(),new El()];}
+    querySelector(){return null;}
+    setAttribute(){}
+  }
+  const elems={main:new El(),overlay:new El(),tabs:new El(),toast:new El(),'backup-file':new El()};
+  ctx.document={getElementById:id=>elems[id]};ctx.window.scrollTo=()=>{};
+  vm.createContext(ctx);vm.runInContext(fs.readFileSync(path.join(root,'content.js'),'utf8'),ctx);
+  vm.runInContext(fs.readFileSync(path.join(root,'app.js'),'utf8'),ctx);
+  elems.tabs.handlers.click({target:{closest:()=>({dataset:{tab:'plants'}})}});
+  assert.match(elems.main.innerHTML,/Розовая/);
+  elems.main.handlers.submit({target:{id:'plant-search-form',values:{query:'Limelight'}},preventDefault(){}});
+  assert.match(elems.main.innerHTML,/Белая/);
+  assert.doesNotMatch(elems.main.innerHTML,/<h3 class="clipped">Розовая<\/h3>/);
+  elems.main.handlers.click({target:{closest:()=>({dataset:{action:'clear-plant-search'}})}});
+  elems.main.handlers.click({target:{closest:()=>({dataset:{action:'plant-filter',filter:'С фотографиями'}})}});
+  assert.match(elems.main.innerHTML,/Белая/);
+  assert.doesNotMatch(elems.main.innerHTML,/<h3 class="clipped">Розовая<\/h3>/);
+});
+test('v1.3: у фото можно открыть описание и сравнение двух снимков',()=>{
+  const first='01234567-89ab-4cde-8f01-234567890abc',second='11234567-89ab-4cde-8f01-234567890abc',stored={};
+  stored['gortenziya_moy_sad_v1']=JSON.stringify({version:1,completed:[],plants:[{id:'p',name:'Куст',photos:[first,second]}]});
+  const ctx={window:{GardenCore:C},console,Date,Math,JSON,URL,Blob,setTimeout:()=>1,clearTimeout:()=>{},
+    localStorage:{getItem:k=>stored[k]||null,setItem:(k,v)=>{stored[k]=v;}},
+    FormData:class{constructor(form){this.values=form.values||{};}get(key){return this.values[key]||'';}},
+  };
+  class El{
+    constructor(){this.innerHTML='';this.classList={toggle:()=>{},add:()=>{},remove:()=>{},contains:()=>true};this.dataset={};this.handlers={};}
+    addEventListener(name,fn){this.handlers[name]=fn;}
+    querySelectorAll(){return [new El(),new El(),new El()];}
+    querySelector(){return null;}
+    setAttribute(){}
+  }
+  const elems={main:new El(),overlay:new El(),tabs:new El(),toast:new El(),'backup-file':new El()};
+  ctx.document={getElementById:id=>elems[id]};ctx.window.scrollTo=()=>{};
+  vm.createContext(ctx);vm.runInContext(fs.readFileSync(path.join(root,'content.js'),'utf8'),ctx);
+  vm.runInContext(fs.readFileSync(path.join(root,'app.js'),'utf8'),ctx);
+  elems.tabs.handlers.click({target:{closest:()=>({dataset:{tab:'plants'}})}});
+  elems.main.handlers.click({target:{closest:()=>({dataset:{action:'open-plant',id:'p'}})}});
+  assert.match(elems.main.innerHTML,/Сравнить два снимка/);
+  elems.main.handlers.click({target:{closest:()=>({dataset:{action:'edit-photo',id:'p',photo:first}})}});
+  assert.match(elems.overlay.innerHTML,/Дата снимка/);
+  elems.overlay.handlers.submit({preventDefault(){},target:{id:'photo-form',dataset:{id:'p',photo:first},values:{day:'2026-08-12',stage:'Цветение',note:'Первое цветение'}}});
+  assert.equal(JSON.parse(stored['gortenziya_moy_sad_v1']).plants[0].photoMeta[first].note,'Первое цветение');
+  elems.main.handlers.click({target:{closest:()=>({dataset:{action:'compare-photos',id:'p'}})}});
+  assert.match(elems.overlay.innerHTML,/Первый снимок/);
+  assert.match(elems.overlay.innerHTML,/Второй снимок/);
+});
+
+test('v1.4: сохранённые сравнения сохраняются в резервной копии',()=>{
+  const a='01234567-89ab-4cde-8f01-234567890abc',b='11234567-89ab-4cde-8f01-234567890abc';
+  const clean=C.sanitizeBackup({version:1,completed:[],plants:[{id:'p',name:'Сад',photos:[a,b],comparisons:[{id:'cmp-12345678',first:a,second:b,created:'2026-09-19',note:'Август и сентябрь'}]}]});
+  assert.equal(clean.plants[0].comparisons.length,1);
+  assert.equal(C.sanitizeBackup(JSON.parse(JSON.stringify(clean))).plants[0].comparisons[0].note,'Август и сентябрь');
+});
+test('v1.4: некорректные сравнения и удалённые фотографии не восстанавливаются',()=>{
+  const a='01234567-89ab-4cde-8f01-234567890abc',b='11234567-89ab-4cde-8f01-234567890abc';
+  const clean=C.sanitizeBackup({version:1,completed:[],plants:[{id:'p',name:'Сад',photos:[a,b],comparisons:[
+    {id:'cmp-12345678',first:a,second:b,note:'Хорошо'},
+    {id:'cmp-12345678',first:a,second:b,note:'Дубликат'},
+    {id:'cmp-87654321',first:a,second:a},
+    {id:'cmp-abcdefgh',first:a,second:'21234567-89ab-4cde-8f01-234567890abc'}]}]});
+  assert.equal(clean.plants[0].comparisons.length,1);
+});
+test('v1.4: календарь цветения проверяет годы, даты и порядок',()=>{
+  const cleaned=C.sanitizeBloomYears([{year:2025,start:'2025-07-02',end:'2025-08-12',note:'Цвёл долго'},
+    {year:2026,start:'2026-09-01',end:'2026-08-01'},
+    {year:2025,start:'2025-06-01'},
+    {year:2024,start:'2025-07-02'}]);
+  assert.equal(cleaned.length,1);
+  assert.equal(cleaned[0].note,'Цвёл долго');
+});
+test('v1.4: календарь учитывает датированные фотографии, но не выдаёт их за границы цветения',()=>{
+  const a='01234567-89ab-4cde-8f01-234567890abc',b='11234567-89ab-4cde-8f01-234567890abc';
+  const p={photos:[a,b],photoMeta:{[a]:{day:'2025-07-12',stage:'Цветение'},[b]:{day:'2026-08-13',stage:'Цветение'}},bloomYears:[{year:2025,start:'2025-07-01',end:'2025-08-20',note:''}]};
+  const timeline=C.bloomTimeline(p);
+  assert.equal(timeline.length,2);
+  assert.equal(timeline[0].year,2026);
+  assert.equal(timeline[0].firstPhoto,'2026-08-13');
+  assert.equal(timeline[0].start,'');
+  assert.equal(timeline[1].start,'2025-07-01');
+});
+test('v1.4: старые резервные копии импортируются с пустым календарём и сравнениями',()=>{
+  const clean=C.sanitizeBackup({version:1,completed:[],plants:[{id:'p',name:'Сад'}]});
+  assert.deepEqual(clean.plants[0].bloomYears,[]);
+  assert.deepEqual(clean.plants[0].comparisons,[]);
+});
+
+test('v1.4: интерфейс показывает календарь и сохранённое сравнение',()=>{
+ const a='01234567-89ab-4cde-8f01-234567890abc',b='11234567-89ab-4cde-8f01-234567890abc';
+ const stored={'gortenziya_moy_sad_v1':JSON.stringify({version:1,completed:[],plants:[{id:'p',name:'Мой куст',photos:[a,b],comparisons:[{id:'cmp-12345678',first:a,second:b,created:'2026-09-18',note:'Первый и второй год'}],bloomYears:[{year:2026,start:'2026-07-01',end:'2026-09-01',note:'Много цветов'}]}]})};
+ const ctx={window:{GardenCore:C},console,Date,Math,JSON,URL,Blob,setTimeout:()=>1,clearTimeout:()=>{},localStorage:{getItem:k=>stored[k]||null,setItem:(k,v)=>{stored[k]=v;}},FormData:class{constructor(form){this.values=form.values||{};}get(key){return this.values[key]||'';}}};
+ class El{constructor(){this.innerHTML='';this.classList={toggle:()=>{},add:()=>{},remove:()=>{},contains:()=>true};this.dataset={};this.handlers={};}addEventListener(n,f){this.handlers[n]=f;}querySelectorAll(){return [new El(),new El(),new El()];}querySelector(){return null;}setAttribute(){}}
+ const elems={main:new El(),overlay:new El(),tabs:new El(),toast:new El(),'backup-file':new El()};
+ ctx.document={getElementById:id=>elems[id]};ctx.window.scrollTo=()=>{};
+ vm.createContext(ctx);vm.runInContext(fs.readFileSync(path.join(root,'content.js'),'utf8'),ctx);vm.runInContext(fs.readFileSync(path.join(root,'app.js'),'utf8'),ctx);
+ elems.tabs.handlers.click({target:{closest:()=>({dataset:{tab:'plants'}})}});
+ elems.main.handlers.click({target:{closest:()=>({dataset:{action:'open-plant',id:'p'}})}});
+ assert.match(elems.main.innerHTML,/Сохранённые сравнения/);assert.match(elems.main.innerHTML,/Первый и второй год/);
+ assert.match(elems.main.innerHTML,/Цветение по годам/);assert.match(elems.main.innerHTML,/Много цветов/);
+ elems.main.handlers.click({target:{closest:()=>({dataset:{action:'edit-bloom',id:'p',year:'2026'}})}});
+ assert.match(elems.overlay.innerHTML,/Начало цветения/);
+ elems.overlay.handlers.submit({preventDefault(){},target:{id:'bloom-form',dataset:{id:'p',year:'2026'},values:{start:'2026-07-01',end:'2026-09-02',note:'Обильное'}}});
+ assert.equal(JSON.parse(stored['gortenziya_moy_sad_v1']).plants[0].bloomYears[0].note,'Обильное');
+});
+
+test('v1.5: фото-справочник содержит 12 сортов, метаданные у 8 проверенных фотографий',()=>{
+ const ctx={window:{},console};vm.createContext(ctx);
+ vm.runInContext(fs.readFileSync(path.join(root,'content.js'),'utf8'),ctx);
+ const vs=ctx.window.GardenContent.varieties;
+ assert.equal(vs.length,12);
+ assert.equal(vs.filter(v=>v.photo).length,8);
+ for(const v of vs){
+   if(!v.photo)continue;
+   assert.match(v.photo,/^https:\/\/commons\.wikimedia\.org\/wiki\/Special:FilePath\//);
+   assert.match(v.photoSource,/^https:\/\/commons\.wikimedia\.org\/wiki\/File:/);
+   assert.ok(v.photoAuthor && v.photoLicense);
+ }
+ assert.equal(vs.find(v=>v.name==='Quick Fire').photo,undefined);
+});
+test('v1.5: ссылки на личные фото сортов валидируются и резервируются',()=>{
+ const id='01234567-89ab-4cde-8f01-234567890abc';
+ const backup=C.sanitizeBackup({version:1,plants:[],customVarieties:[],completed:[],catalogPhotos:{b0:id}});
+ assert.equal(backup.catalogPhotos.b0,id);
+ assert.deepEqual(Object.keys(C.sanitizeBackup({version:1,plants:[],completed:[]}).catalogPhotos),[]);
+ assert.throws(()=>C.sanitizeCatalogPhotos({'../../secret':id}));
+ assert.throws(()=>C.sanitizeCatalogPhotos({'b0':'../../photo.jpg'}));
+ assert.throws(()=>C.sanitizeCatalogPhotos({'b12':id}));
+ assert.throws(()=>C.sanitizeCatalogPhotos(Object.fromEntries(Array.from({length:113},(_,i)=>['b'+i,id]))));
+});
+test('v1.5: навигация фото-справочника, явная загрузка онлайн-фото и выбор локального фото',()=>{
+ const storage={},picked=[];
+ const ctx={window:{GardenCore:C,GardenAndroid:{cloudConfigured:()=>false,pickPhoto:id=>picked.push(id),deleteLocalPhoto:()=>{}}},console,Date,Math,JSON,URL,Blob,setTimeout:()=>1,clearTimeout:()=>{},
+   localStorage:{getItem:k=>storage[k]||null,setItem:(k,v)=>{storage[k]=v;}},
+   FormData:class{constructor(form){this.values=form.values;}get(key){return this.values[key]||'';}}
+ };
+ class El{constructor(){this.innerHTML='';this.classList={toggle:()=>{},add:()=>{},remove:()=>{},contains:()=>true};this.dataset={};this.handlers={};}
+   addEventListener(name,fn){this.handlers[name]=fn;} querySelectorAll(){return [new El(),new El(),new El()];}querySelector(){return null;}setAttribute(){} }
+ const elems={main:new El(),overlay:new El(),tabs:new El(),toast:new El(),'backup-file':new El()};
+ ctx.document={getElementById:id=>elems[id]};ctx.window.scrollTo=()=>{};
+ vm.createContext(ctx);vm.runInContext(fs.readFileSync(path.join(root,'content.js'),'utf8'),ctx);
+ vm.runInContext(fs.readFileSync(path.join(root,'app.js'),'utf8'),ctx);
+ const act=(action,id='')=>elems.main.handlers.click({target:{closest:()=>({dataset:{action,id}})}});
+ elems.tabs.handlers.click({target:{closest:()=>({dataset:{tab:'guide'}})}});
+ act('guide-mode','sort');
+ assert.match(elems.main.innerHTML,/Фото-справочник сортов/);
+ assert.doesNotMatch(elems.main.innerHTML,/<img class="catalog-photo" src="https:\/\/commons/);
+ act('toggle-catalog-online');
+ assert.match(elems.main.innerHTML,/<img class="catalog-photo" src="https:\/\/commons/);
+ act('view-variety','b0');
+ assert.match(elems.main.innerHTML,/Описание сорта/);
+ act('catalog-pick','b0');assert.deepEqual(picked,['catalog:b0']);
+ ctx.window.nativePhotoAdded('catalog:b0','01234567-89ab-4cde-8f01-234567890abc');
+ assert.equal(JSON.parse(storage['gortenziya_moy_sad_v1']).catalogPhotos.b0,'01234567-89ab-4cde-8f01-234567890abc');
+ assert.match(elems.main.innerHTML,/Ваше фото/);
+ act('catalog-remove','b0');
+ assert.equal(JSON.parse(storage['gortenziya_moy_sad_v1']).catalogPhotos.b0,undefined);
+});
+
 console.log(`ИТОГО: ${total} тестов пройдено`);

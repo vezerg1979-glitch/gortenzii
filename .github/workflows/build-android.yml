@@ -58,6 +58,9 @@ jobs:
           gradle-version: '8.9'
 
       - name: Build installable debug APK
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
       - name: Upload APK (Actions > Artifacts)
