@@ -15,23 +15,15 @@
 
 **Важно:** сроки календаря ориентировочные для средней полосы; учитывайте местную погоду, сорт, возраст и состояние почвы. Ни одна функция не предписывает полив только из-за даты. Справочник переработан из предоставленного пользователем пособия «Пособие по выращиванию метельчатой гортензии (Hydrangea paniculata)»; это не фитопатологическая диагностика.
 
-## Получить APK через GitHub (без Android Studio)
+## Открыть и собрать APK в Android Studio
 
-1. Распакуйте архив и опубликуйте **содержимое проекта**, включая скрытую папку `.github`, в своём репозитории GitHub. Пошаговая инструкция для GitHub Desktop и командной строки — в [`GITHUB_INSTRUCTIONS.md`](GITHUB_INSTRUCTIONS.md).
-2. Перейдите в **Actions → Android APK → Run workflow** (или дождитесь автоматического запуска после `push` в `main`/`master`).
-3. После успешного выполнения откройте запуск → **Artifacts** → скачайте `Gortenziya-Moy-Sad-debug-APK`. Внутри будет файл `app-debug.apk`.
+1. Распакуйте архив и откройте папку `Gortenziya_Moy_Sad` в **Android Studio** через **File → Open**.
+2. Установите из **SDK Manager** Android SDK Platform 35. Для сборки проекта потребуются **JDK 17**, **Gradle 8.9**, Android Gradle Plugin 8.7.3 и Kotlin Gradle Plugin 2.0.21. При первом открытии IDE может скачать необходимые компоненты через интернет (само приложение интернета не требует).
+3. В этом ZIP нет бинарного `gradle-wrapper.jar`. Если ваша IDE предлагает выбрать Gradle, укажите установленную версию **8.9**; при необходимости установите Gradle и один раз выполните в корне проекта `gradle wrapper --gradle-version 8.9`. Это создаст стандартные `gradlew`, `gradlew.bat`, `gradle/wrapper/*`.
+4. Дождитесь синхронизации Gradle, затем выберите **Build → Build Bundle(s) / APK(s) → Build APK(s)**. Если используете командную строку после создания wrapper, выполните `./gradlew assembleDebug` (Windows: `gradlew.bat assembleDebug`).
+5. Готовый тестовый APK появится по пути `app/build/outputs/apk/debug/app-debug.apk`. Устанавливайте через Android Studio на подключённый телефон или перенесите APK на устройство и установите с разрешением установки из выбранного источника, если это разрешено настройками устройства.
 
-Workflow запускает JavaScript-тесты, проверяет синтаксис и собирает тестовый APK с Android SDK 35, JDK 17 и Gradle 8.9. APK появляется **только после успешной сборки**; файл ZIP с исходниками сам по себе не является APK. Для работы CI GitHub должен иметь доступ к загрузкам Android SDK, Gradle и плагинов.
-
-## Открыть и собрать в Android Studio
-
-1. Откройте корень проекта через **File → Open**.
-2. Установите **Android SDK Platform 35**, **JDK 17** и **Gradle 8.9**. Используется Android Gradle Plugin 8.7.3 и Kotlin Gradle Plugin 2.0.21.
-3. В данном репозитории **нет бинарного Gradle Wrapper**: в Android Studio выберите установленный Gradle 8.9. При желании создайте стандартный wrapper локально командой `gradle wrapper --gradle-version 8.9` и добавьте полученные `gradlew`, `gradlew.bat` и `gradle/wrapper/*` в свой репозиторий.
-4. Запустите **Build → Build Bundle(s) / APK(s) → Build APK(s)**. При сборке через терминал с установленным Gradle: `gradle :app:assembleDebug`.
-5. Локальная отладочная сборка: `app/build/outputs/apk/debug/app-debug.apk`.
-
-Минимальная версия Android: **6.0 (API 23)**. Целевая: **Android 14 (API 34)**. Подписанный для публикации релиз требует отдельной настройки личного ключа; не публикуйте секретные ключи в репозитории.
+Минимальная версия Android: **6.0 (API 23)**. Целевая: Android 14 (API 34). Подписанный релизный APK / публикация в Google Play требуют вашего ключа подписи и отдельных действий.
 
 ## Предпросмотр без Android Studio
 
