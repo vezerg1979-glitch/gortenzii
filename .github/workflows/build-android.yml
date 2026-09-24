@@ -25,13 +25,20 @@ jobs:
           node-version: '22'
 
       - name: Run JavaScript tests
-        run: node tests/test_core.js
+        run: |
+          node tests/test_core.js
+          node tests/test_telegram.mjs
+          node tests/test_topics.mjs
 
       - name: Check JavaScript syntax
         run: |
           node --check app/src/main/assets/app.js
           node --check app/src/main/assets/core.js
           node --check app/src/main/assets/content.js
+          node --check app/src/main/assets/catalog_expanded.js
+          node --check app/src/main/assets/variety_keys.js
+          node --check supabase/functions/gortenzium-webhook/rules.mjs
+          node --check supabase/functions/gortenzium-webhook/topic-rules.mjs
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4

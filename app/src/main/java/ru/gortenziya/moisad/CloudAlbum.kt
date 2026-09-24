@@ -7,6 +7,7 @@ import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.util.UUID
 
 /** Supabase REST. The publishable/anon key is public; NEVER put a service-role key in an APK. */
@@ -79,9 +80,13 @@ class CloudAlbum(private val context: Context) {
         val token = session()
         return when (action) {
             "list" -> {
-                val columns = "id,owner_id,nickname,variety,caption,storage_path,status,created_at"
-                val q1 = "/rest/v1/garden_photos?select=$columns&status=eq.approved&order=created_at.desc&limit=30"
-                val q2 = "/rest/v1/garden_photos?select=$columns&owner_id=eq.${uid()}&status=eq.pending&order=created_at.desc&limit=10"
+                val columns = "id,owner_id,nickname,variety,variety_key,caption,storage_path,status,created_at"
+                val varietyKey = input.optString("varietyKey", "").trim()
+                require(varietyKey.isEmpty() || varietyKey.matches(Regex("[\\p{L}0-9_]{1,100}"))) { "Неверный сорт" }
+                val filter = if (varietyKey.isEmpty()) "&variety_key=not.is.null" else
+                    "&variety_key=eq.${URLEncoder.encode(varietyKey, "UTF-8")}" 
+                val q1 = "/rest/v1/garden_photos?select=$columns&status=eq.approved$filter&order=created_at.desc&limit=30"
+                val q2 = "/rest/v1/garden_photos?select=$columns&owner_id=eq.${uid()}&status=eq.pending$filter&order=created_at.desc&limit=10"
                 val approved = JSONArray(req("GET", q1, token))
                 val pending = JSONArray(req("GET", q2, token))
                 val all = JSONArray()
@@ -99,11 +104,63 @@ class CloudAlbum(private val context: Context) {
                     val url = if (sign.startsWith("/object/sign/$bucket/")) root + "/storage/v1" + sign else ""
                     output.put(JSONObject().put("id", item.getString("id"))
                         .put("nickname", item.optString("nickname")).put("variety", item.optString("variety"))
+                        .put("variety_key", item.optString("variety_key"))
                         .put("caption", item.optString("caption")).put("created_at", item.optString("created_at"))
                         .put("status", item.optString("status")).put("mine", item.optString("owner_id") == uid())
                         .put("url", url))
                 }
-                JSONObject().put("items", output)
+                // Forum topics are bound by a real administrator, using Telegram numeric IDs.
+                // Topic names and caption hashtags are NOT used to infer the cultivar.
+                val forumTopics = JSONArray()
+                var telegramReady = true
+                try {
+                    val topicRows = JSONArray(req("GET", "/rest/v1/gortenzium_topics?select=chat_id,message_thread_id,variety_key,topic_title&" +
+                        (if (varietyKey.isEmpty()) "variety_key=not.is.null" else "variety_key=eq.${URLEncoder.encode(varietyKey, "UTF-8")}") +
+                        "&limit=150", token))
+                    for (i in 0 until topicRows.length()) {
+                        val row = topicRows.getJSONObject(i)
+                        val group = row.optString("chat_id")
+                        val thread = row.optString("message_thread_id")
+                        if (!group.matches(Regex("-100[0-9]{6,}")) || !thread.matches(Regex("[0-9]{1,15}"))) continue
+                        forumTopics.put(JSONObject().put("chat_id", group).put("message_thread_id", thread)
+                            .put("variety_key", row.optString("variety_key")))
+                    }
+                    val telegramRows = JSONArray(req("GET", "/rest/v1/telegram_topic_gallery?select=chat_id,message_id,message_thread_id,caption,variety_key,variety_storage_path,created_at&variety_key=" +
+                        (if (varietyKey.isEmpty()) "not.is.null" else "eq.${URLEncoder.encode(varietyKey, "UTF-8")}") +
+                        "&order=created_at.desc&limit=30", token))
+                    for (i in 0 until telegramRows.length()) {
+                        val post = telegramRows.getJSONObject(i)
+                        val messageId = post.optString("message_id")
+                        val group = post.optString("chat_id")
+                        val thread = post.optString("message_thread_id")
+                        if (!messageId.matches(Regex("[1-9][0-9]{0,14}")) ||
+                            !group.matches(Regex("-100[0-9]{6,}")) ||
+                            !thread.matches(Regex("[1-9][0-9]{0,14}"))) continue
+                        // Reject foreign or stale topic mappings, even if the row's variety_key was set.
+                        val mapped = (0 until forumTopics.length()).any { idx ->
+                            val t = forumTopics.getJSONObject(idx)
+                            t.optString("chat_id") == group && t.optString("message_thread_id") == thread &&
+                                t.optString("variety_key") == post.optString("variety_key")
+                        }
+                        if (!mapped) continue
+                        val storedPath = post.optString("variety_storage_path")
+                        val expectedPath = "Gortenzium/topics/${post.optString("variety_key")}/$messageId.jpg"
+                        if (storedPath != expectedPath || storedPath.contains("..")) continue
+                        val imageUrl = "$root/storage/v1/object/public/gortenzium-channel/" +
+                            storedPath.split('/').joinToString("/") { URLEncoder.encode(it, "UTF-8") }
+                        output.put(JSONObject()
+                            .put("id", "telegram-$group-$messageId")
+                            .put("nickname", "Gortenzium · тема Telegram")
+                            .put("variety", post.optString("variety_key").replace('_', ' '))
+                            .put("variety_key", post.optString("variety_key"))
+                            .put("caption", post.optString("caption").take(180))
+                            .put("created_at", post.optString("created_at"))
+                            .put("status", "approved").put("mine", false).put("source", "telegram")
+                            .put("forum_chat_id", group).put("forum_message_id", messageId)
+                            .put("url", imageUrl))
+                    }
+                } catch (_: Exception) { telegramReady = false }
+                JSONObject().put("items", output).put("topics", forumTopics).put("telegramReady", telegramReady)
             }
             "upload" -> {
                 require(input.optBoolean("consent", false)) { "Подтвердите согласие на публикацию" }
@@ -114,10 +171,13 @@ class CloudAlbum(private val context: Context) {
                 require(file.canonicalFile.parentFile == localPhotos.canonicalFile && file.isFile) { "Локальная фотография не найдена" }
                 val bytes = file.readBytes()
                 require(bytes.size in 100..1_000_000) { "Фото должно быть меньше 1 МБ" }
+                val varietyKey = text(input.optString("varietyKey"), 100)
+                require(varietyKey.matches(Regex("[\\p{L}0-9_]{1,100}"))) { "Выберите сорт из справочника" }
                 val postId = UUID.randomUUID().toString()
                 val path = "${uid()}/$postId.jpg"
                 val row = JSONObject().put("id", postId).put("owner_id", uid()).put("storage_path", path)
                     .put("nickname", nick).put("variety", text(input.optString("variety"), 60))
+                    .put("variety_key", varietyKey)
                     .put("caption", text(input.optString("caption"), 180))
                 req("POST", "/rest/v1/garden_photos", token, json(row), prefer="return=minimal")
                 try {

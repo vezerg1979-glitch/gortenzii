@@ -40,7 +40,7 @@
     if (!input || typeof input !== 'object') throw Error('Некорректный сорт');
     const id=safeString(input.id,70), name=safeString(input.name,80);
     if (!/^v-[a-z0-9-]{8,64}$/.test(id) || !name || !name.trim()) throw Error('Некорректный ID или название сорта');
-    return {id,name,height:safeString(input.height,70),color:safeString(input.color,100),
+    return {id,name,species:/^Hydrangea(?: [×a-z-]+){1,2}$/i.test(input.species||'')?safeString(input.species,90):'Hydrangea paniculata',height:safeString(input.height,70),color:safeString(input.color,100),
       bloom:BLOOM_TYPES.includes(input.bloom)?input.bloom:'Неизвестно',
       tag:VARIETY_TAGS.includes(input.tag)?input.tag:'Другой',notes:safeString(input.notes,500)};
   }
@@ -112,13 +112,13 @@
       return !q||[p.name,p.variety,p.place].some(value=>normalizedVarietyName(value).includes(q));
     });
   }
-  const CATALOG_IMAGE_KEY = /^(?:b(?:[0-9]|1[01])|v-[a-z0-9-]{8,64})$/;
+  const CATALOG_IMAGE_KEY = /^(?:b(?:[0-9]|[1-9][0-9]|10[0-9])|v-[a-z0-9-]{8,64})$/;
   const LOCAL_PHOTO_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
   function sanitizeCatalogPhotos(input){
     if(input === undefined)return {};
     if(!input || typeof input !== 'object' || Array.isArray(input))throw Error('Некорректные фото справочника');
     const output=Object.create(null),entries=Object.entries(input);
-    if(entries.length>112)throw Error('Превышен лимит фотографий справочника');
+    if(entries.length>209)throw Error('Превышен лимит фотографий справочника');
     for(const [key,id] of entries){
       if(!CATALOG_IMAGE_KEY.test(key) || typeof id!=='string' || !LOCAL_PHOTO_ID.test(id))
         throw Error('Некорректная ссылка на фото сорта');

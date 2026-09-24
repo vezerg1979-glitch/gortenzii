@@ -3,6 +3,8 @@ package ru.gortenziya.moisad
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.ActivityNotFoundException
+import androidx.core.content.FileProvider
 import android.net.Uri
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -110,6 +112,71 @@ class MainActivity : Activity() {
             if (uri.scheme != "https" || uri.host != "commons.wikimedia.org" ||
                 uri.path?.startsWith("/wiki/File:") != true || url.length > 600) return
             runOnUiThread { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+        }
+        /** Opens only a numeric post inside the hardcoded public Gortenzium channel. */
+        @JavascriptInterface fun openTelegramPost(messageId: String) {
+            if (!Regex("[0-9]{1,20}").matches(messageId) || messageId.all { it == '0' }) return
+            runOnUiThread {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/Gortenzium/$messageId"))
+                    .addCategory(Intent.CATEGORY_BROWSABLE)
+                try { startActivity(intent) }
+                catch (_: ActivityNotFoundException) {
+                    Toast.makeText(this@MainActivity, "Не удалось открыть публикацию", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+        /** Opens exactly one numeric Telegram forum topic, never an arbitrary URL from page content. */
+        @JavascriptInterface fun openTelegramForumTopic(chatId: String, threadId: String) {
+            openTelegramForumItem(chatId, threadId)
+        }
+        @JavascriptInterface fun openTelegramForumPost(chatId: String, messageId: String) {
+            openTelegramForumItem(chatId, messageId)
+        }
+        private fun openTelegramForumItem(chatId: String, messageId: String) {
+            if (!Regex("-100[0-9]{6,}").matches(chatId) ||
+                !Regex("[1-9][0-9]{0,14}").matches(messageId)) return
+            val groupInternalId = chatId.removePrefix("-100")
+            runOnUiThread {
+                val uri = Uri.parse("https://t.me/c/$groupInternalId/$messageId")
+                val intent = Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE)
+                try { startActivity(intent) }
+                catch (_: ActivityNotFoundException) {
+                    Toast.makeText(this@MainActivity, "Не удалось открыть тему Telegram", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+        /** Opens only the owner-provided public community link, never an arbitrary URL from JS. */
+        @JavascriptInterface fun openTelegramChannel() {
+            runOnUiThread {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/Gortenzium"))
+                    .addCategory(Intent.CATEGORY_BROWSABLE)
+                try { startActivity(intent) }
+                catch (_: ActivityNotFoundException) {
+                    Toast.makeText(this@MainActivity, "Не найдено приложение для открытия ссылки", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+        /** Shares one sanitized local JPEG only after the user confirms and chooses a recipient. */
+        @JavascriptInterface fun sharePhoto(photoId: String, caption: String) {
+            if (!photoIdPattern.matches(photoId) || caption.length > 180) return
+            val image = File(photos, "$photoId.jpg")
+            if (!image.isFile) return
+            runOnUiThread {
+                try {
+                    val uri = FileProvider.getUriForFile(
+                        this@MainActivity, "${BuildConfig.APPLICATION_ID}.fileprovider", image)
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = "image/jpeg"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        putExtra(Intent.EXTRA_TEXT, caption.filter { it >= ' ' }.take(180))
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        clipData = android.content.ClipData.newUri(contentResolver, "Фото гортензии", uri)
+                    }
+                    startActivity(Intent.createChooser(send, "Поделиться фотографией гортензии"))
+                } catch (_: Exception) {
+                    Toast.makeText(this@MainActivity, "Не удалось открыть меню отправки", Toast.LENGTH_LONG).show()
+                }
+            }
         }
         @JavascriptInterface fun deleteLocalPhoto(photoId: String) {
             if (photoIdPattern.matches(photoId)) File(photos, "$photoId.jpg").delete()

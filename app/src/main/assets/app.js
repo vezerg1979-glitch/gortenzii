@@ -3,6 +3,7 @@
 const C = window.GardenCore;
 const D = window.GardenContent;
 const STORE = 'gortenziya_moy_sad_v1';
+const TELEGRAM_CHANNEL = 'https://t.me/Gortenzium';
 const main = document.getElementById('main');
 const overlay = document.getElementById('overlay');
 const tabs = document.getElementById('tabs');
@@ -13,13 +14,18 @@ let month = new Date().getMonth();
 let guideMode = 'care';
 let varietyFilter = 'Все';
 let varietySearch = '';
+let speciesFilter = 'Все виды';
+let speciesSearch = '';
+let speciesShown = 30;
+let varietyShown = 30;
 let selectedVariety = '';
 let externalPhotosEnabled = false;
 let plantFilter = 'Все';
 let plantQuery = '';
 let comparePhotos = [];
 let comparePlantId = '';
-let galleryFilter = 'Все';
+let galleryFilter = 'Все'; // Все · Gortenzium · Пользователи
+let galleryVarietyKey = ''; // empty = folders view; nonempty = exact cultivar
 let plantDraft = null;
 let editingVariety = '';
 let returningToPlant = false;
@@ -29,6 +35,8 @@ let data = readState();
 let galleryItems = [];
 let galleryBusy = false;
 let galleryError = '';
+let telegramReady = null;
+let forumTopics = [];
 let uploadPhoto = '';
 let uploadPlant = '';
 const onlineAvailable = !!(window.GardenAndroid && window.GardenAndroid.cloudConfigured && window.GardenAndroid.cloudConfigured());
@@ -75,14 +83,19 @@ function readState() {
 }
 function save() { localStorage.setItem(STORE, JSON.stringify(data)); }
 function allVarieties(){ return [...D.varieties,...data.customVarieties]; }
+function mappedVariety(name){return (window.GardenVarietyKeys||[]).find(v=>C.normalizedVarietyName(v.name)===C.normalizedVarietyName(name))||null;}
 function catalogKey(v){const i=D.varieties.indexOf(v);return v.id|| (i>=0?'b'+i:'');}
 function isCatalogKey(key){return D.varieties.some(v=>catalogKey(v)===key)||data.customVarieties.some(v=>v.id===key);}
 function catalogImage(v){
  const key=catalogKey(v),local=data.catalogPhotos?.[key];
  if(local)return {url:localPhotoUrl(local),credit:'Ваше фото · хранится на телефоне',kind:'local'};
- if(externalPhotosEnabled && v.photo && /^https:\/\/commons\.wikimedia\.org\/wiki\/Special:FilePath\//.test(v.photo))
-   return {url:v.photo,credit:'Фото: '+v.photoAuthor+' · '+v.photoLicense+' · Wikimedia Commons',kind:'commons'};
- return {url:'',credit:v.photo?'Для фотографии из Wikimedia Commons нажмите «Показать онлайн-фото».':'У этого сорта пока нет проверенной фотографии. Добавьте свою.',kind:'none'};
+ if(v.photo && !/^https?:\/\//.test(v.photo))
+   return {url:v.photo,credit:v.photoCredit||'Встроенное фото-иллюстрация гортензии',kind:'bundled'};
+ if(externalPhotosEnabled && v.onlinePhoto && /^https:\/\/commons\.wikimedia\.org\/wiki\/Special:FilePath\//.test(v.onlinePhoto))
+   return {url:v.onlinePhoto,credit:'Фото: '+v.onlinePhotoAuthor+' · '+v.onlinePhotoLicense+' · Wikimedia Commons',kind:'commons'};
+ if(v.onlinePhotoSource)
+   return {url:'',credit:'Для этого сорта доступны встроенное фото и страница с точным онлайн-снимком в Wikimedia Commons.',kind:'none'};
+ return {url:'',credit:'У этого сорта пока нет фотографии. Добавьте свою.',kind:'none'};
 }
 function catalogPicture(v){
  const pic=catalogImage(v);
@@ -141,6 +154,25 @@ function hero() {
   const desc = m<=1||m===11?'Проверьте укрытие и берегите ветви от тяжёлого снега.':m<=4?'Наблюдайте за кустами, почвой и погодой — весенний уход начинается с осмотра.':m<=7?'Проверяйте влажность грунта, любуйтесь цветением и отмечайте заботу о кустах.':'Наблюдайте за листьями и соцветиями, постепенно готовьте растения к зиме.';
   return `<div class="date-line">${esc(nowTitle())}</div><section class="hero"><div class="hero-art">${flowerIllustration()}</div><div class="hero-kicker">✧ ${phase}</div><h1>${title}</h1><p>${desc}</p><span class="hero-tag">🌿 Советы по сезону</span></section>`;
 }
+function telegramCard(){
+ return `<section class="card telegram-card"><div class="telegram-heading"><span class="telegram-icon" aria-hidden="true">✈</span><div><h3>Сообщество Gortenzium</h3><p class="intro">Фотографии и обсуждение гортензий в Telegram.</p></div></div><button class="btn btn-primary btn-block" data-action="open-telegram">Открыть Gortenzium в Telegram ↗</button><p class="muted tiny">Telegram — отдельный сервис. Переход и публикация происходят только по вашему выбору.</p></section>`;
+}
+function openTelegramChannel(){
+ if(window.GardenAndroid?.openTelegramChannel){window.GardenAndroid.openTelegramChannel();return;}
+ if(typeof window.open==='function')window.open(TELEGRAM_CHANNEL,'_blank','noopener,noreferrer');
+}
+function telegramPhotoSheet(plantId,photoId){
+ const p=data.plants.find(x=>x.id===plantId && (x.photos||[]).includes(photoId));if(!p)return;
+ const registered=mappedVariety(p.variety);
+ const tag=registered?' #сорт_'+registered.key+' #в_альбом':'';
+ const caption='Гортензия'+(p.variety?' · '+C.safeString(p.variety,80):'')+' 🌸'+tag;
+ openSheet(`<h2 class="sheet-title">Поделиться фотографией</h2>${picture(photoId,p.name)}
+ <p class="sheet-description">Выберите Telegram в системном меню отправки и самостоятельно укажите чат или получателя. Только администраторы могут публиковать в канале Gortenzium. Приложение не отправит фото в канал автоматически.</p>
+ <p class="muted tiny">${registered?'К подписи будет добавлена метка сорта '+esc(tag)+'. Она поможет администратору отправить фото именно в соответствующий раздел.':'Сорт не выбран из общего каталога: автоматическая синхронизация не сработает, пока администратор не укажет сорт.'}</p>
+ <p class="muted tiny">Перед отправкой проверьте, что на снимке нет лиц, адреса, номеров и других личных данных. Место посадки и заметки дневника не передаются.</p>
+ <div class="btn-row"><button class="btn btn-primary" data-action="confirm-telegram-share" data-id="${attr(plantId)}" data-photo="${attr(photoId)}">Выбрать, кому отправить</button><button class="btn btn-outline" data-action="close">Отмена</button></div>
+ <button class="btn btn-outline btn-block" data-action="open-telegram" style="margin-top:10px">Посмотреть канал Gortenzium ↗</button>`);
+}
 function careCard(task, idx, calendarMonth=new Date().getMonth(), now=new Date()) {
   const key=C.checklistKey(task.id,calendarMonth,now.getFullYear());
   const done=data.completed.includes(key);
@@ -160,6 +192,7 @@ function todayPage() {
   ${outstanding.length+due.length===0?`<div class="empty"><span class="large-emoji">🌸</span><h3>Все дела отмечены</h3><p>Загляните в календарь, если хотите посмотреть задачи на другие месяцы.</p></div>`:''}
   <div class="section-head"><h2>Мои гортензии</h2><button class="aux" data-action="go-plants">${data.plants.length?'Смотреть все →':'Добавить +'} </button></div>
   ${data.plants.length?data.plants.slice(0,2).map(plantCard).join(''):`<div class="empty"><span class="large-emoji">🌿</span><h3>Посадим первую?</h3><p>Добавьте свою гортензию, чтобы сохранять историю ухода и получать подсказки для каждого куста.</p><button class="btn btn-primary" data-action="add-plant">+ Добавить гортензию</button></div>`}
+  ${telegramCard()}
   <div class="section-head"><h2>Полезно знать</h2></div><div class="action-card">${glyph('sprout')}<div style="flex:1"><h3>Не поливайте по расписанию</h3><p>Сначала проверьте почву — после дождя полив может быть лишним.</p></div><button data-action="guide-article" data-id="watering">Читать</button></div>`;
 }
 function plantsPage() {
@@ -182,7 +215,7 @@ function plantDetail() {
     <div class="card"><div class="mini-label">СОСТОЯНИЕ ПОЧВЫ</div><h3 style="font-size:17px;margin:8px 0">${esc(moisture.text)}</h3><p class="intro">${esc(moisture.secondary)}. Последняя проверка: ${p.lastCheck?dayLabel(p.lastCheck):'ещё не было'}.</p><div class="btn-row"><button class="btn btn-primary" data-action="moisture" data-id="${attr(p.id)}">Проверить почву</button><button class="btn btn-outline" data-action="water" data-id="${attr(p.id)}">+ Полив</button></div></div>
     <div class="section-head"><h2>Фотоистория</h2><span class="pill">${p.photos?.length||0} из 12</span></div>
     <p class="intro">Укажите дату, этап роста и заметку: так можно сравнивать цветение по сезонам. Личные фотографии не публикуются автоматически.</p>
-    <div class="photo-grid">${C.photoTimeline(p).map(photo=>`<div class="photo-tile">${picture(photo.id,p.name)}<div class="photo-info"><strong>${photo.day?dayLabel(photo.day):'Дата не указана'}</strong><small>${esc(photo.stage)}</small>${photo.note?`<small class="photo-note">${esc(photo.note)}</small>`:''}</div><div class="photo-tools"><button data-action="edit-photo" data-id="${attr(p.id)}" data-photo="${attr(photo.id)}">Описание</button><button data-action="share-photo" data-id="${attr(p.id)}" data-photo="${attr(photo.id)}">В альбом</button><button data-action="delete-photo" data-id="${attr(p.id)}" data-photo="${attr(photo.id)}" aria-label="Удалить фото">✕</button></div></div>`).join('')}</div>
+    <div class="photo-grid">${C.photoTimeline(p).map(photo=>`<div class="photo-tile">${picture(photo.id,p.name)}<div class="photo-info"><strong>${photo.day?dayLabel(photo.day):'Дата не указана'}</strong><small>${esc(photo.stage)}</small>${photo.note?`<small class="photo-note">${esc(photo.note)}</small>`:''}</div><div class="photo-tools"><button data-action="edit-photo" data-id="${attr(p.id)}" data-photo="${attr(photo.id)}">Описание</button><button data-action="share-photo" data-id="${attr(p.id)}" data-photo="${attr(photo.id)}">В альбом</button><button data-action="share-telegram-photo" data-id="${attr(p.id)}" data-photo="${attr(photo.id)}">В Telegram</button><button data-action="delete-photo" data-id="${attr(p.id)}" data-photo="${attr(photo.id)}" aria-label="Удалить фото">✕</button></div></div>`).join('')}</div>
     <button class="btn btn-primary btn-block" data-action="add-photo" data-id="${attr(p.id)}" ${p.photos?.length>=12?'disabled':''}>+ Добавить фотографию</button>
     ${(p.photos||[]).length>=2?`<button class="btn btn-outline btn-block" data-action="compare-photos" data-id="${attr(p.id)}">⇆ Сравнить два снимка</button>`:''}
     ${savedComparisons(p)}
@@ -206,38 +239,56 @@ function calendarPage(){
 function guidePage() {
   if(selectedVariety && guideMode==='sort'){const found=allVarieties().find(v=>catalogKey(v)===selectedVariety);if(found)return varietyDetail(found);selectedVariety='';}
   if(article) return articlePage();
-  const choices=[['care','Уход'],['sort','Сорта'],['problem','Что с кустом?']];
-  return `${header()}<h1 class="page-title">Справочник</h1><p class="sub-title">Короткие практические советы по метельчатой гортензии.</p>
+  const choices=[['care','Уход'],['sort','Сорта'],['species','Виды'],['problem','Проблемы']];
+  return `${header()}<h1 class="page-title">Справочник</h1><p class="sub-title">Каталог видов и культурных форм. Практические советы ниже относятся прежде всего к метельчатой гортензии.</p>
   <div class="segment">${choices.map(([id,label])=>`<button class="${guideMode===id?'active':''}" data-action="guide-mode" data-id="${id}">${label}</button>`).join('')}</div>
   <div style="height:18px"></div>
   ${guideMode==='care'?D.guides.map(g=>`<button class="list-card" data-action="guide-article" data-id="${g.id}">${glyph(g.icon)}<span style="flex:1"><strong>${esc(g.title)}</strong><small>${esc(g.sub)}</small></span><span class="chevron">›</span></button>`).join(''):
-    guideMode==='sort'?varietiesView():problemsView()}
-  <div class="source-note">Справочник адаптирован из приложенного пособия «Пособие по выращиванию метельчатой гортензии (Hydrangea paniculata)». Уход может отличаться в зависимости от сорта, возраста куста и климата.</div>`;
+    guideMode==='sort'?varietiesView():guideMode==='species'?speciesView():problemsView()}
+  <div class="source-note">Практические советы по уходу адаптированы из приложенного пособия о метельчатой гортензии. У остальных видов обрезка, зимовка и требования к почве могут существенно отличаться. Названия видов: Kew POWO; названия культурных форм: RHS. Уточняйте актуальные ботанические наименования и условия ухода.</div>`;
 }
 function varietiesView(){
   const opts=['Все','Мои сорта','Компактный','Ранний','Поздний','Высокий'];
   const query=C.normalizedVarietyName(varietySearch);
-  const matched=allVarieties().filter(v=>(varietyFilter==='Все'||(varietyFilter==='Мои сорта'&&!!v.id)||v.tag===varietyFilter||v.bloom===varietyFilter) && (!query || C.normalizedVarietyName([v.name,v.color,v.tag,v.notes].join(' ')).includes(query)));
-  return `<div class="card"><h3>Фото-справочник сортов</h3><p class="intro">Сортовые фотографии из Wikimedia Commons загружаются по вашему запросу через интернет. В карточки можно добавить собственные фотографии — они останутся только на вашем телефоне.</p>
-    <button class="btn ${externalPhotosEnabled?'btn-outline':'btn-secondary'} btn-block" data-action="toggle-catalog-online" aria-pressed="${externalPhotosEnabled}">${externalPhotosEnabled?'Скрыть онлайн-фото':'Показать онлайн-фото'}</button>
-    <button class="btn btn-primary btn-block" data-action="add-variety" style="margin-top:9px">+ Добавить новый сорт</button></div>
+  const matched=allVarieties().filter(v=>(varietyFilter==='Все'||(varietyFilter==='Мои сорта'&&!!v.id)||v.tag===varietyFilter||v.bloom===varietyFilter) && (speciesFilter==='Все виды'||v.species===speciesFilter) && (!query || C.normalizedVarietyName([v.name,v.species,v.color,v.tag,v.notes].join(' ')).includes(query)));
+  const shown=matched.slice(0,varietyShown);
+  return `<div class="card"><h3>Фото-справочник сортов</h3><p class="intro">В справочник добавлены встроенные фотографии гортензий. Они доступны без интернета. При желании можно заменить фото своим снимком — он останется только на вашем телефоне.</p>
+    <p class="muted tiny">У новых карточек нет неподтверждённых фотографий. Для первых 12 приведены иллюстративные снимки, не удостоверяющие точный сорт.</p><button class="btn btn-primary btn-block" data-action="add-variety" style="margin-top:9px">+ Добавить новый сорт</button></div>
     <label class="form-field"><span>Найти сорт</span><input class="input" id="variety-search" placeholder="Название, окраска, особенности" maxlength="80" value="${attr(varietySearch)}" /></label>
     <div class="filter-row">${opts.map(x=>`<button class="filter ${varietyFilter===x?'selected':''}" data-action="variety-filter" data-filter="${attr(x)}">${esc(x)}</button>`).join('')}</div>
-    ${matched.map(v=>`<article class="variety catalog-card">${catalogPicture(v)}<div class="catalog-body"><div class="top"><h3>${esc(v.name)}</h3><span class="pill">${v.id?'Мой сорт':esc(v.tag)}</span></div>
-      <div class="meta">Высота: ${esc(v.height||'Не указана')}<br/>Соцветия: ${esc(v.color||'Не указаны')}<br/>Цветение: ${esc(v.bloom==='Неизвестно'?'не указано':v.bloom.toLowerCase())}</div>
+    <label class="form-field"><span>Ботанический вид</span><select class="input" id="species-filter"><option value="Все виды">Все виды</option>${[...new Set(allVarieties().map(v=>v.species).filter(Boolean))].sort().map(s=>`<option value="${attr(s)}" ${speciesFilter===s?'selected':''}>${esc(s)}</option>`).join('')}</select></label>
+    <p class="intro">Найдено: ${matched.length}. Показано: ${shown.length}.</p>
+    ${shown.map(v=>`<article class="variety catalog-card">${catalogPicture(v)}<div class="catalog-body"><div class="top"><h3>${esc(v.name)}</h3><span class="pill">${v.id?'Мой сорт':esc(v.tag)}</span></div>
+      <div class="meta">${esc(v.species||'Вид не указан')}<br/>Высота: ${esc(v.height||'Не указана')}<br/>Соцветия: ${esc(v.color||'Не указаны')}<br/>Цветение: ${esc(v.bloom==='Неизвестно'?'не указано':v.bloom.toLowerCase())}</div>
       <button class="btn btn-outline btn-block" data-action="view-variety" data-id="${attr(catalogKey(v))}" style="margin-top:12px">Открыть карточку и фотографии →</button></div></article>`).join('')}
+    ${shown.length<matched.length?'<button class="btn btn-outline btn-block" data-action="variety-more">Показать ещё 30 →</button>':''}
     ${!matched.length?'<p class="intro">По вашему запросу сорта не найдены.</p>':''}`;
+}
+function speciesView(){
+ const list=D.speciesList||[];
+ const query=C.normalizedVarietyName(speciesSearch);
+ const filtered=list.filter(s=>!query||C.normalizedVarietyName(s.latin+' '+s.common).includes(query));
+ const shown=filtered.slice(0,speciesShown);
+ return `<div class="card"><h3>Ботанические виды и гибриды</h3><p class="intro">Индекс научных названий для поиска. У Kew Plants of the World Online число признанных видов меняется с уточнением таксономии; не все перечисленные названия обязательно имеют статус принятого вида в текущей редакции. Для проверки откройте Kew.</p>
+ <button class="btn btn-outline btn-block" data-action="open-kew">Открыть актуальный реестр Kew ↗</button></div>
+ <label class="form-field"><span>Поиск вида</span><input class="input" id="species-search" maxlength="80" placeholder="Название по-латыни или по-русски" value="${attr(speciesSearch)}" /></label>
+ <p class="intro">В указателе ${list.length} названий. Найдено ${filtered.length}.</p>
+ ${shown.map(s=>`<article class="variety"><h3>${esc(s.latin)}</h3><p class="muted tiny">${esc(s.common)}</p><button class="btn btn-outline" data-action="species-varieties" data-id="${attr(s.latin)}">Сорта этого вида →</button></article>`).join('')}
+ ${shown.length<filtered.length?'<button class="btn btn-outline btn-block" data-action="species-more">Показать ещё 30 →</button>':''}
+ ${!filtered.length?'<p class="intro">Вид не найден. Проверьте написание.</p>':''}`;
 }
 function varietyDetail(v){
  const pic=catalogImage(v),key=catalogKey(v),count=data.plants.filter(p=>C.normalizedVarietyName(p.variety)===C.normalizedVarietyName(v.name)).length;
  return `<div class="header-row"><button class="back" data-action="variety-back" aria-label="К сортам">←</button><span class="eyebrow">ФОТО-СПРАВОЧНИК · HYDRANGEA PANICULATA</span></div>
- <h1 class="page-title">${esc(v.name)}</h1><div class="catalog-detail-photo">${catalogPicture(v)}</div>
+ <h1 class="page-title">${esc(v.name)}</h1><p class="intro">${esc(v.species||'Вид не указан')} · ${esc(v.tag||'Культурная форма')}</p><div class="catalog-detail-photo">${catalogPicture(v)}</div>
  <div class="card"><h3>Описание сорта</h3><p class="intro">Высота: ${esc(v.height||'Не указана')}<br/>Окраска: ${esc(v.color||'Не указана')}<br/>Срок цветения: ${esc(v.bloom||'Не указан')}<br/>Особенности: ${esc(v.tag||'Не указаны')}</p>${v.notes?`<p>${esc(v.notes)}</p>`:''}
  <p class="muted tiny">${esc(pic.credit)}</p>
- ${pic.kind==='commons'?`<button class="text-button" data-action="photo-source" data-id="${attr(key)}">Открыть источник фотографии и условия лицензии ↗</button>`:''}
+ ${v.onlinePhotoSource?`<button class="text-button" data-action="photo-source" data-id="${attr(key)}">Открыть страницу фото на Wikimedia Commons ↗</button>`:''}
+ ${v.reference?`<button class="text-button" data-action="variety-reference" data-id="${attr(key)}">Посмотреть источник названия сорта ↗</button>`:''}
  <div class="btn-row" style="margin-top:15px"><button class="btn btn-primary" data-action="catalog-pick" data-id="${attr(key)}">${data.catalogPhotos[key]?'Заменить моё фото':'+ Добавить моё фото'}</button>
  ${data.catalogPhotos[key]?`<button class="btn btn-danger" data-action="catalog-remove" data-id="${attr(key)}">Удалить моё фото</button>`:''}</div>
  <p class="muted tiny">Личное фото привязано к сорту в справочнике, не публикуется в общем альбоме и не входит в JSON-копию как файл.</p></div>
+ <div class="card"><h3>Фото сообщества · ${esc(v.name)}</h3><p class="intro">Снимки из привязанной темы Telegram и публикации пользователей для этого сорта собраны отдельно.</p><button class="btn btn-outline btn-block" data-action="view-variety-gallery" data-id="${attr(key)}">Посмотреть фотографии сорта →</button></div>
  <div class="card"><h3>Ваш сад · ${count} ${count===1?'куст':'кустов'}</h3><button class="btn btn-outline btn-block" data-action="add-plant-variety" data-id="${attr(key)}">+ Добавить куст этого сорта</button></div>
  ${v.id?`<button class="btn btn-outline" data-action="edit-variety" data-id="${attr(v.id)}">Изменить описание сорта</button>`:''}`;
 }
@@ -256,32 +307,40 @@ function morePage(){
     <div class="card"><div class="setting"><div><strong>Ежедневное напоминание</strong><small>Уведомление примерно в 9:00: проверить задачи и влажность грунта.</small></div><button class="toggle ${reminderEnabled?'on':''}" role="switch" aria-checked="${reminderEnabled}" aria-label="Ежедневное напоминание" data-action="reminder"></button></div>
     <div class="setting"><div><strong>Резервная копия сада</strong><small>Сохраните растения, собственные сорта, историю и выполненные задачи в JSON-файл.</small></div><button class="btn btn-secondary" data-action="export">Сохранить</button></div>
     <div class="setting" style="border:0"><div><strong>Восстановить данные</strong><small>Загрузка резервной копии заменит текущие записи.</small></div><button class="btn btn-outline" data-action="import">Загрузить</button></div></div>
-    <div class="card"><div class="mini-label">О ПРИЛОЖЕНИИ</div><h3 style="margin:10px 0 7px">Гортензия · Мой сад</h3><p class="intro">Версия 1.5 · Для метельчатой гортензии (Hydrangea paniculata). Личный дневник работает без интернета. Фотографии хранятся на этом телефоне и не входят в JSON-копию. Общий альбом доступен только после подключения сервиса и публикации по вашему согласию; анонимный аккаунт общего альбома привязан к устройству.</p></div>
+    ${telegramCard()}
+    <div class="card"><div class="mini-label">О ПРИЛОЖЕНИИ</div><h3 style="margin:10px 0 7px">Гортензия · Мой сад</h3><p class="intro">Версия 2.1 · Справочник нескольких видов гортензий и ботанический указатель. Личный дневник работает без интернета. Фотографии хранятся на этом телефоне и не входят в JSON-копию. Общий альбом доступен только после подключения сервиса и публикации по вашему согласию; анонимный аккаунт общего альбома привязан к устройству.</p></div>
     <div class="source-note">Советы основаны на предоставленном пользователем пособии. Календарь служит напоминанием об осмотре, а не автоматической инструкцией к поливу или применению средств защиты.</div>`;
 }
 function galleryPage(){
   return `${header()}<h1 class="page-title">Альбом сообщества 🌸</h1>
-  <p class="sub-title">Сравнивайте цветение и уход. Фотографии публикуются только по желанию владельца и после проверки модератором.</p>
+  <p class="sub-title">Фото участников после модерации и разрешённые администратором снимки из тем группы Gortenzium, распределённые по сортам. Каждому сорту соответствует одна подтверждённая тема. Личный сад в канал и общий альбом автоматически не отправляется.</p>
+  ${telegramCard()}
   <div class="card"><h3>Поделитесь результатом</h3><p class="intro">Откройте «Мой сад» → карточку куста → добавьте фото → «В альбом». Здесь нет личных сообщений, геолокации и публичных контактов.</p>
   ${onlineAvailable?`<button class="btn btn-outline" data-action="gallery-refresh" ${galleryBusy?'disabled':''}>${galleryBusy?'Загрузка…':'Обновить альбом'}</button>`:
   `<p class="intro">Общий альбом будет доступен после подключения владельцем приложения облачного хранилища. Личные фото уже можно сохранять без интернета.</p>`}</div>
   ${galleryError?`<div class="source-note">${esc(galleryError)}</div>`:''}
-  ${galleryItems.map(item=>`<article class="card gallery-card">
-    ${item.url?`<img class="gallery-image" src="${attr(item.url)}" alt="Метельчатая гортензия сорта ${attr(item.variety||'не указан')}" loading="lazy" referrerpolicy="no-referrer"/>`:'<p class="intro">Фотография временно недоступна.</p>'}
-    <div class="row-line"><strong>${esc(item.nickname)}</strong><span class="pill">${esc(item.status==='pending'?'На проверке':item.variety||'Гортензия')}</span></div>
+  ${onlineAvailable && telegramReady===false?'<div class="source-note">Синхронизация тем Telegram пока не подключена. Администратору необходимо настроить привязку тем к сортам.</div>':''}
+  <div class="card"><label class="form-field"><span>Раздел по сорту</span><select id="gallery-variety" class="input"><option value="">Выберите сорт (все разделы)</option>${(window.GardenVarietyKeys||[]).map(v=>`<option value="${attr(v.key)}" ${galleryVarietyKey===v.key?'selected':''}>${esc(v.name)}</option>`).join('')}</select></label></div>
+  ${!galleryVarietyKey?`<div class="card"><h3>Разделы сортов</h3><p class="intro">Выберите сорт: фотографии других сортов не смешиваются с выбранным разделом.</p>${[...new Set([...galleryItems.map(p=>p.variety_key),...forumTopics.map(t=>t.variety_key)].filter(Boolean))].map(key=>{const v=(window.GardenVarietyKeys||[]).find(x=>x.key===key);return v?`<button class="list-card" data-action="gallery-variety" data-id="${attr(key)}">${glyph('flower')}<span style="flex:1"><strong>${esc(v.name)}</strong><small>Фото сообщества · ${galleryItems.filter(i=>i.variety_key===key).length}</small></span><span class="chevron">›</span></button>`:''}).join('') || '<p class="intro">Публикаций пока нет. Сорт можно выбрать в списке выше.</p>'}</div>`:`<div class="card"><button class="btn btn-outline" data-action="gallery-variety" data-id="">← Все сорта</button><h2>${esc((window.GardenVarietyKeys||[]).find(x=>x.key===galleryVarietyKey)?.name||'Сорт')}</h2>${forumTopics.find(t=>t.variety_key===galleryVarietyKey)?`<button class="btn btn-secondary btn-block" data-action="open-telegram-topic" data-chat="${attr(forumTopics.find(t=>t.variety_key===galleryVarietyKey).chat_id)}" data-thread="${attr(forumTopics.find(t=>t.variety_key===galleryVarietyKey).message_thread_id)}">Открыть тему этого сорта в Telegram ↗</button>`:'<p class="intro">Тема сорта пока не привязана администратором Telegram. Фото из неподтверждённых тем не импортируются.</p>'}</div>`}
+  ${galleryVarietyKey?`<div class="filter-row">${['Все','Gortenzium','Пользователи'].map(x=>`<button class="filter ${galleryFilter===x?'selected':''}" data-action="gallery-filter" data-filter="${attr(x)}">${esc(x)}</button>`).join('')}</div>
+  ${galleryItems.filter(item=>item.variety_key===galleryVarietyKey && (galleryFilter==='Все'||(galleryFilter==='Gortenzium' ? item.source==='telegram' : item.source!=='telegram'))).map(item=>`<article class="card gallery-card">
+    ${item.url?`<img class="gallery-image" src="${attr(item.url)}" alt="Фотография гортензии: ${attr(item.variety||'сорт не указан')}" loading="lazy" referrerpolicy="no-referrer"/>`:'<p class="intro">Фотография временно недоступна.</p>'}
+    <div class="row-line"><strong>${esc(item.nickname)}</strong><span class="pill">${esc(item.source==='telegram'?'Из темы Gortenzium':item.status==='pending'?'На проверке':item.variety||'Гортензия')}</span></div>
     ${item.caption?`<p class="intro">${esc(item.caption)}</p>`:''}
     <p class="muted tiny">${esc(item.variety||'Сорт не указан')} · ${esc((item.created_at||'').slice(0,10))}</p>
-    ${item.mine?`<button class="btn btn-outline" data-action="remove-shared" data-photo="${attr(item.id)}">Удалить публикацию</button>`:
+    ${item.source==='telegram' && /^-100[0-9]{6,}$/.test(item.forum_chat_id||'') && /^[1-9][0-9]{0,14}$/.test(item.forum_message_id||'')?
+    `<button class="btn btn-outline" data-action="open-forum-post" data-chat="${attr(item.forum_chat_id)}" data-post="${attr(item.forum_message_id)}">Открыть фото в теме Telegram ↗</button>`:
+    item.mine?`<button class="btn btn-outline" data-action="remove-shared" data-photo="${attr(item.id)}">Удалить публикацию</button>`:
     `<button class="btn btn-outline" data-action="report-shared" data-photo="${attr(item.id)}">Пожаловаться</button>`}
-  </article>`).join('')}
+  </article>`).join('')}</div>`:''}
   ${onlineAvailable&&!galleryBusy&&!galleryItems.length&&!galleryError?'<p class="intro">Пока нет опубликованных фотографий. Новые фотографии сначала проверяет модератор.</p>':''}`;
 }
 async function refreshGallery(){
   if(!onlineAvailable)return;
   galleryBusy=true;galleryError='';render();
-  try {const result=await cloud('list');galleryItems=Array.isArray(result.items)?result.items:[];}
+  try {const result=await cloud('list',{varietyKey:galleryVarietyKey});galleryItems=Array.isArray(result.items)?result.items:[];forumTopics=Array.isArray(result.topics)?result.topics:[];telegramReady=result.telegramReady===true;}
   catch(e){galleryError=e.message||'Не удалось загрузить альбом';}
-  finally{galleryBusy=false;if(current==='gallery')render();}
+  finally{galleryBusy=false;if(current==='gallery'||current==='guide')render();}
 }
 function photoSheet(plantId,photoId){
   const p=data.plants.find(x=>x.id===plantId && (x.photos||[]).includes(photoId));if(!p)return;
@@ -351,7 +410,7 @@ function sharingSheet(plant, photo){
     ${picture(photo,p.name)}
     <p class="sheet-description">Фото увидят другие пользователи после проверки модератором. Можно указать только вымышленное имя и сорт; местоположение и личные заметки не отправляются. Публикацию можно удалить с этого устройства.</p>
     <form id="share-form"><label class="form-field"><span>Псевдоним (не настоящее имя) *</span><input class="input" name="nickname" maxlength="24" required placeholder="Например, Любитель цветов" /></label>
-    <label class="form-field"><span>Сорт</span><input class="input" name="variety" maxlength="60" value="${attr(p.variety)}" /></label>
+    <label class="form-field"><span>Сорт (обязательно)</span><select class="input" name="varietyKey" required><option value="">Выберите сорт</option>${(window.GardenVarietyKeys||[]).map(v=>`<option value="${attr(v.key)}" ${mappedVariety(p.variety)?.key===v.key?'selected':''}>${esc(v.name)}</option>`).join('')}</select></label>
     <label class="form-field"><span>Описание цветения (не более 180 знаков)</span><textarea class="input" name="caption" maxlength="180" placeholder="Например, первое цветение в этом сезоне"></textarea></label>
     <label class="form-field"><input type="checkbox" name="consent" required /> На снимке только растения, без людей, адресов, номеров и другой личной информации. Я согласен(на) опубликовать эту фотографию для просмотра другими пользователями.</label>
     <div class="btn-row"><button type="submit" class="btn btn-primary">Отправить на проверку</button><button type="button" class="btn btn-outline" data-action="close">Отмена</button></div></form>`);
@@ -377,13 +436,14 @@ function plantForm(id='',draft=null) {
   </form>`);
 }
 function varietySheet(id='',fromPlant=false,prefill='') {
-  const v=data.customVarieties.find(x=>x.id===id)||{name:prefill,height:'',color:'',bloom:'Неизвестно',tag:'Другой',notes:''};
+  const v=data.customVarieties.find(x=>x.id===id)||{name:prefill,species:'Hydrangea paniculata',height:'',color:'',bloom:'Неизвестно',tag:'Другой',notes:''};
   editingVariety=id;returningToPlant=fromPlant;
   const options=(items,selected)=>items.map(x=>`<option value="${attr(x)}" ${x===selected?'selected':''}>${esc(x)}</option>`).join('');
   openSheet(`<h2 class="sheet-title">${id?'Изменить сорт':'Новый сорт гортензии 🌸'}</h2>
   <p class="sheet-description">Добавьте сведения о сорте из этикетки питомника или собственных наблюдений. Эта запись личная и не появится в общем альбоме автоматически.</p>
   <form id="variety-form" data-id="${attr(id)}">
   <label class="form-field"><span>Название сорта *</span><input class="input" name="name" required maxlength="80" value="${attr(v.name)}" placeholder="Например, Pink Diamond" /></label>
+  <label class="form-field"><span>Ботанический вид</span><select class="input" name="species">${options((D.speciesList||[{latin:'Hydrangea paniculata'}]).map(s=>s.latin),v.species||'Hydrangea paniculata')}</select></label>
   <label class="form-field"><span>Высота взрослого куста</span><input class="input" name="height" maxlength="70" value="${attr(v.height)}" placeholder="Например, до 1,5 м" /></label>
   <label class="form-field"><span>Цвет соцветий</span><input class="input" name="color" maxlength="100" value="${attr(v.color)}" placeholder="Белый → розовый" /></label>
   <label class="form-field"><span>Срок цветения</span><select class="input" name="bloom">${options(C.BLOOM_TYPES,v.bloom)}</select></label>
@@ -468,7 +528,23 @@ function handle(e){
   const button=e.target.closest('[data-action]');if(!button)return;
   const act=button.dataset.action,id=button.dataset.id;
   switch(act){
+    case 'open-telegram':openTelegramChannel();break;
+    case 'share-telegram-photo':telegramPhotoSheet(id,button.dataset.photo);break;
+    case 'confirm-telegram-share':{
+      const p=data.plants.find(x=>x.id===id && (x.photos||[]).includes(button.dataset.photo));
+      if(!p || !window.GardenAndroid?.sharePhoto) {toast('Отправка фотографии доступна в Android-приложении');break;}
+      const registered=mappedVariety(p.variety);
+      const caption='Гортензия'+(p.variety?' · '+C.safeString(p.variety,80):'')+' 🌸'+(registered?' #сорт_'+registered.key+' #в_альбом':'');
+      window.GardenAndroid.sharePhoto(button.dataset.photo,caption);
+      closeSheet();break;
+    }
     case 'gallery-refresh':refreshGallery();break;
+    case 'gallery-variety':galleryVarietyKey=button.dataset.id||'';go('gallery');refreshGallery();break;
+    case 'view-variety-gallery':{const v=allVarieties().find(x=>catalogKey(x)===id);const mapped=v&&mappedVariety(v.name);if(!mapped){toast('Этот сорт ещё не зарегистрирован в общем каталоге');break;}galleryVarietyKey=mapped.key;go('gallery');refreshGallery();break;}
+    case 'gallery-filter':if(['Все','Gortenzium','Пользователи'].includes(button.dataset.filter)){galleryFilter=button.dataset.filter;render();}break;
+    case 'open-telegram-topic':if(window.GardenAndroid?.openTelegramForumTopic)window.GardenAndroid.openTelegramForumTopic(button.dataset.chat||'',button.dataset.thread||'');break;
+    case 'open-forum-post':if(window.GardenAndroid?.openTelegramForumPost)window.GardenAndroid.openTelegramForumPost(button.dataset.chat||'',button.dataset.post||'');break;
+    case 'open-telegram-post':if(/^https:\/\/t\.me\/Gortenzium\/[0-9]{1,20}$/.test(button.dataset.post||'') && window.GardenAndroid?.openTelegramPost)window.GardenAndroid.openTelegramPost(button.dataset.post.split('/').pop());break;
     case 'plant-filter':plantFilter=button.dataset.filter;render();break;
     case 'clear-plant-search':plantQuery='';plantFilter='Все';render();break;
     case 'edit-photo':photoSheet(id,button.dataset.photo);break;
@@ -531,7 +607,7 @@ function handle(e){
     case 'delete-variety-confirm':{
       if(data.catalogPhotos[id]){window.GardenAndroid?.deleteLocalPhoto(data.catalogPhotos[id]);delete data.catalogPhotos[id];}
       selectedVariety='';data.customVarieties=data.customVarieties.filter(v=>v.id!==id);
-      save();closeSheet();guideMode='sort';varietyFilter='Мои сорта';go('guide');toast('Сорт удалён; записи кустов сохранены');break;
+      save();closeSheet();guideMode='sort';varietyFilter='Мои сорта';speciesFilter='Все виды';go('guide');toast('Сорт удалён; записи кустов сохранены');break;
     }
     case 'close':closeSheet();break;
     case 'delete-plant':confirmation(id);break;
@@ -561,7 +637,7 @@ function handle(e){
       if(data.catalogPhotos[id]){window.GardenAndroid?.deleteLocalPhoto(data.catalogPhotos[id]);delete data.catalogPhotos[id];save();render();}break;
     case 'photo-source':{
       const v=allVarieties().find(v=>catalogKey(v)===id);
-      if(v?.photoSource && window.GardenAndroid?.openPhotoSource)window.GardenAndroid.openPhotoSource(v.photoSource);
+      if(v?.onlinePhotoSource && window.GardenAndroid?.openPhotoSource)window.GardenAndroid.openPhotoSource(v.onlinePhotoSource);
       else toast('Источник фотографии указан в файле PHOTO_CREDITS.md');break;
     }
     case 'add-plant-variety':{
@@ -570,7 +646,12 @@ function handle(e){
     }
     case 'guide-article':go('guide',{article:id});break;
     case 'problem':go('guide',{article:id});break;
-    case 'variety-filter':varietyFilter=button.dataset.filter;render();break;
+    case 'variety-filter':varietyFilter=button.dataset.filter;varietyShown=30;render();break;
+    case 'variety-more':varietyShown+=30;render();break;
+    case 'species-more':speciesShown+=30;render();break;
+    case 'species-varieties':speciesFilter=id;varietyFilter='Все';varietySearch='';varietyShown=30;guideMode='sort';render();break;
+    case 'open-kew':if(window.GardenAndroid?.openPhotoSource)window.GardenAndroid.openPhotoSource(D.catalogSources.sourceKew);else toast('Источник: Kew Plants of the World Online');break;
+    case 'variety-reference':{const v=allVarieties().find(v=>catalogKey(v)===id);if(v?.reference&&window.GardenAndroid?.openPhotoSource)window.GardenAndroid.openPhotoSource(v.reference);else toast('Источник: каталог RHS');break;}
     case 'reminder':
       if(window.GardenAndroid)window.GardenAndroid.setReminderEnabled(!reminderEnabled);
       else {reminderEnabled=!reminderEnabled;localStorage.setItem('garden_demo_reminder',reminderEnabled?'yes':'no');toast('В браузерной версии системные уведомления недоступны');render();}
@@ -580,10 +661,14 @@ function handle(e){
   }
 }
 main.addEventListener('change',e=>{
-  if(e.target?.id==='variety-search'){varietySearch=e.target.value.slice(0,80);render();}
+  if(e.target?.id==='gallery-variety'){galleryVarietyKey=e.target.value;refreshGallery();}
+  if(e.target?.id==='variety-search'){varietySearch=e.target.value.slice(0,80);varietyShown=30;render();}
+  if(e.target?.id==='species-search'){speciesSearch=e.target.value.slice(0,80);speciesShown=30;render();}
+  if(e.target?.id==='species-filter'){speciesFilter=e.target.value;varietyShown=30;render();}
 });
 main.addEventListener('keydown',e=>{
-  if(e.target?.id==='variety-search'&&e.key==='Enter'){e.preventDefault();varietySearch=e.target.value.slice(0,80);render();}
+  if(e.target?.id==='variety-search'&&e.key==='Enter'){e.preventDefault();varietySearch=e.target.value.slice(0,80);varietyShown=30;render();}
+  if(e.target?.id==='species-search'&&e.key==='Enter'){e.preventDefault();speciesSearch=e.target.value.slice(0,80);speciesShown=30;render();}
 });
 overlay.addEventListener('submit',e=>{
   e.preventDefault();const form=e.target,inputs=new FormData(form);
@@ -610,10 +695,12 @@ overlay.addEventListener('submit',e=>{
     save();closeSheet();go('plants',{plant:p.id});toast('Фотоистория сохранена');return;
   }
   if(form.id==='share-form'){
-    const nickname=C.safeString(inputs.get('nickname'),24),variety=C.safeString(inputs.get('variety'),60),caption=C.safeString(inputs.get('caption'),180);
+    const nickname=C.safeString(inputs.get('nickname'),24),varietyKey=String(inputs.get('varietyKey')||''),known=(window.GardenVarietyKeys||[]).find(x=>x.key===varietyKey),caption=C.safeString(inputs.get('caption'),180);
+    if(!known){toast('Выберите сорт из справочника');return;}
+    const variety=known.name;
     if(!nickname||!inputs.get('consent')){toast('Нужны псевдоним и согласие');return;}
     const btn=form.querySelector('button[type=submit]');if(btn){btn.disabled=true;btn.textContent='Отправка…';}
-    cloud('upload',{photoId:uploadPhoto,nickname,variety,caption,consent:true}).then(()=>{
+    cloud('upload',{photoId:uploadPhoto,nickname,variety,varietyKey,caption,consent:true}).then(()=>{
       closeSheet();toast('Фотография отправлена на проверку');go('gallery');refreshGallery();
     }).catch(err=>{toast('Не удалось отправить: '+err.message);if(btn){btn.disabled=false;btn.textContent='Отправить на проверку';}});
     return;
@@ -626,7 +713,7 @@ overlay.addEventListener('submit',e=>{
     const existing=data.customVarieties.find(v=>v.id===id);
     if(!existing&&data.customVarieties.length>=100){toast('Достигнут лимит: 100 собственных сортов');return;}
     const raw={id:id||'v-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,11),name,
-      height:inputs.get('height'),color:inputs.get('color'),bloom:inputs.get('bloom'),tag:inputs.get('tag'),notes:inputs.get('notes')};
+      species:inputs.get('species'),height:inputs.get('height'),color:inputs.get('color'),bloom:inputs.get('bloom'),tag:inputs.get('tag'),notes:inputs.get('notes')};
     try{
       const clean=C.sanitizeVariety(raw);
       if(existing){
@@ -637,7 +724,7 @@ overlay.addEventListener('submit',e=>{
       }else data.customVarieties.push(clean);
       save();closeSheet();
       if(returningToPlant&&plantDraft){const draft={...plantDraft,variety:clean.name};plantDraft=null;returningToPlant=false;plantForm(draft.id,draft);}
-      else {guideMode='sort';varietyFilter='Мои сорта';go('guide');}
+      else {guideMode='sort';varietyFilter='Мои сорта';speciesFilter='Все виды';go('guide');}
       toast('Сорт сохранён в личном справочнике');
     }catch(err){toast(err.message||'Не удалось сохранить сорт');}
     return;

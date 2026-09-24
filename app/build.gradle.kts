@@ -20,8 +20,8 @@ android {
         applicationId = "ru.gortenziya.moisad"
         minSdk = 23
         targetSdk = 34
-        versionCode = 5
-        versionName = "1.4.0"
+        versionCode = 11
+        versionName = "2.1.0"
         buildConfigField("String", "SUPABASE_URL", "\"${cloudValue("SUPABASE_URL", "SUPABASE_URL").replace("\\", "\\\\").replace("\"", "\\\"")}\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"${cloudValue("SUPABASE_ANON_KEY", "SUPABASE_ANON_KEY").replace("\\", "\\\\").replace("\"", "\\\"")}\"")
     }
@@ -32,3 +32,6 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
 }
+
+// FileProvider grants a temporary read-only URI to the photo selected by the user.
+dependencies { implementation("androidx.core:core:1.13.1") }

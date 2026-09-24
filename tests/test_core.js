@@ -388,19 +388,17 @@ test('v1.4: интерфейс показывает календарь и сох
  assert.equal(JSON.parse(stored['gortenziya_moy_sad_v1']).plants[0].bloomYears[0].note,'Обильное');
 });
 
-test('v1.5: фото-справочник содержит 12 сортов, метаданные у 8 проверенных фотографий',()=>{
+test('v1.6: фото-справочник содержит 12 сортов и локальные встроенные фотографии',()=>{
  const ctx={window:{},console};vm.createContext(ctx);
  vm.runInContext(fs.readFileSync(path.join(root,'content.js'),'utf8'),ctx);
  const vs=ctx.window.GardenContent.varieties;
  assert.equal(vs.length,12);
- assert.equal(vs.filter(v=>v.photo).length,8);
+ assert.equal(vs.filter(v=>v.photo).length,12);
  for(const v of vs){
-   if(!v.photo)continue;
-   assert.match(v.photo,/^https:\/\/commons\.wikimedia\.org\/wiki\/Special:FilePath\//);
-   assert.match(v.photoSource,/^https:\/\/commons\.wikimedia\.org\/wiki\/File:/);
-   assert.ok(v.photoAuthor && v.photoLicense);
+   assert.match(v.photo,/^catalog_photos\//);
  }
- assert.equal(vs.find(v=>v.name==='Quick Fire').photo,undefined);
+ assert.ok(vs.filter(v=>v.onlinePhotoSource).length>=8);
+ assert.equal(vs.find(v=>v.name==='Quick Fire').photo,'catalog_photos/quick_fire.jpg');
 });
 test('v1.5: ссылки на личные фото сортов валидируются и резервируются',()=>{
  const id='01234567-89ab-4cde-8f01-234567890abc';
@@ -409,10 +407,11 @@ test('v1.5: ссылки на личные фото сортов валидир�
  assert.deepEqual(Object.keys(C.sanitizeBackup({version:1,plants:[],completed:[]}).catalogPhotos),[]);
  assert.throws(()=>C.sanitizeCatalogPhotos({'../../secret':id}));
  assert.throws(()=>C.sanitizeCatalogPhotos({'b0':'../../photo.jpg'}));
- assert.throws(()=>C.sanitizeCatalogPhotos({'b12':id}));
- assert.throws(()=>C.sanitizeCatalogPhotos(Object.fromEntries(Array.from({length:113},(_,i)=>['b'+i,id]))));
+ assert.equal(C.sanitizeCatalogPhotos({'b100':id}).b100,id);
+ assert.throws(()=>C.sanitizeCatalogPhotos({'b999':id}));
+ assert.throws(()=>C.sanitizeCatalogPhotos(Object.fromEntries(Array.from({length:210},(_,i)=>['b'+i,id]))));
 });
-test('v1.5: навигация фото-справочника, явная загрузка онлайн-фото и выбор локального фото',()=>{
+test('v1.6: навигация фото-справочника показывает встроенные фото и позволяет выбрать локальное фото',()=>{
  const storage={},picked=[];
  const ctx={window:{GardenCore:C,GardenAndroid:{cloudConfigured:()=>false,pickPhoto:id=>picked.push(id),deleteLocalPhoto:()=>{}}},console,Date,Math,JSON,URL,Blob,setTimeout:()=>1,clearTimeout:()=>{},
    localStorage:{getItem:k=>storage[k]||null,setItem:(k,v)=>{storage[k]=v;}},
@@ -428,17 +427,97 @@ test('v1.5: навигация фото-справочника, явная за�
  elems.tabs.handlers.click({target:{closest:()=>({dataset:{tab:'guide'}})}});
  act('guide-mode','sort');
  assert.match(elems.main.innerHTML,/Фото-справочник сортов/);
- assert.doesNotMatch(elems.main.innerHTML,/<img class="catalog-photo" src="https:\/\/commons/);
- act('toggle-catalog-online');
- assert.match(elems.main.innerHTML,/<img class="catalog-photo" src="https:\/\/commons/);
+ assert.match(elems.main.innerHTML,/<img class="catalog-photo" src="catalog_photos\//);
  act('view-variety','b0');
  assert.match(elems.main.innerHTML,/Описание сорта/);
+ assert.match(elems.main.innerHTML,/встроенн/i);
  act('catalog-pick','b0');assert.deepEqual(picked,['catalog:b0']);
  ctx.window.nativePhotoAdded('catalog:b0','01234567-89ab-4cde-8f01-234567890abc');
  assert.equal(JSON.parse(storage['gortenziya_moy_sad_v1']).catalogPhotos.b0,'01234567-89ab-4cde-8f01-234567890abc');
  assert.match(elems.main.innerHTML,/Ваше фото/);
  act('catalog-remove','b0');
  assert.equal(JSON.parse(storage['gortenziya_moy_sad_v1']).catalogPhotos.b0,undefined);
+});
+
+test('v1.7: в расширенном каталоге есть научные названия и культурные формы нескольких видов',()=>{
+ const ctx={window:{},console};vm.createContext(ctx);
+ vm.runInContext(fs.readFileSync(path.join(root,'content.js'),'utf8'),ctx);
+ vm.runInContext(fs.readFileSync(path.join(root,'catalog_expanded.js'),'utf8'),ctx);
+ const d=ctx.window.GardenContent;
+ assert.ok(d.speciesList.length>=98);
+ assert.ok(d.varieties.length>=100);
+ for(const name of ['Hydrangea paniculata','Hydrangea macrophylla','Hydrangea arborescens','Hydrangea quercifolia','Hydrangea serrata']){
+   assert.ok(d.speciesList.some(s=>s.latin===name));
+   assert.ok(d.varieties.some(v=>v.species===name));
+ }
+ assert.equal(d.varieties.slice(0,12).every(v=>v.species==='Hydrangea paniculata'),true);
+ assert.equal(new Set(d.speciesList.map(s=>s.latin)).size,d.speciesList.length);
+});
+test('v1.7: расширенный справочник выбирает виды и открывает карточки без выдуманных фото',()=>{
+ const storage={},ctx={window:{GardenCore:C},console,Date,Math,JSON,URL,Blob,setTimeout:()=>1,clearTimeout:()=>{},
+   localStorage:{getItem:k=>storage[k]||null,setItem:(k,v)=>{storage[k]=v;}},
+   FormData:class{constructor(form){this.values=form.values||{};}get(k){return this.values[k]||'';}}};
+ class El {constructor(){this.innerHTML='';this.classList={toggle:()=>{},add:()=>{},remove:()=>{},contains:()=>true};this.dataset={};this.handlers={};}
+   addEventListener(n,f){this.handlers[n]=f;}querySelectorAll(){return [new El(),new El(),new El()];}querySelector(){return null;}setAttribute(){} }
+ const elems={main:new El(),overlay:new El(),tabs:new El(),toast:new El(),'backup-file':new El()};
+ ctx.document={getElementById:id=>elems[id]};ctx.window.scrollTo=()=>{};
+ vm.createContext(ctx);
+ for(const file of ['content.js','catalog_expanded.js','app.js'])vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),ctx);
+ const act=(action,id='')=>elems.main.handlers.click({target:{closest:()=>({dataset:{action,id}})}});
+ elems.tabs.handlers.click({target:{closest:()=>({dataset:{tab:'guide'}})}});
+ act('guide-mode','species');assert.match(elems.main.innerHTML,/Ботанические виды и гибриды/);
+ act('species-varieties','Hydrangea quercifolia');assert.match(elems.main.innerHTML,/Snow Queen/);
+ assert.doesNotMatch(elems.main.innerHTML,/Bobo/);
+ const newVar=ctx.window.GardenContent.varieties.findIndex(v=>v.name==='Snow Queen');
+ act('view-variety','b'+newVar);assert.match(elems.main.innerHTML,/Snow Queen/);
+ assert.match(elems.main.innerHTML,/Фото пока нет/);
+});
+test('v1.8: Gortenzium присутствует на главной и в альбоме, переход открывает адрес владельца',()=>{
+ const opened=[],ctx={window:{GardenCore:C,GardenAndroid:{cloudConfigured:()=>false,openTelegramChannel:()=>opened.push('open')}},console,Date,Math,JSON,URL,Blob,setTimeout:()=>1,clearTimeout:()=>{},
+   localStorage:{getItem:()=>null,setItem:()=>{}},FormData:class{constructor(form){this.values=form.values||{};}get(k){return this.values[k]||'';}}};
+ class El{constructor(){this.innerHTML='';this.classList={toggle:()=>{},add:()=>{},remove:()=>{},contains:()=>true};this.dataset={};this.handlers={};}addEventListener(n,f){this.handlers[n]=f;}querySelectorAll(){return [new El(),new El(),new El()];}querySelector(){return null;}setAttribute(){}scrollIntoView(){}}
+ const elems={main:new El(),overlay:new El(),tabs:new El(),toast:new El(),'backup-file':new El()};
+ ctx.document={getElementById:id=>elems[id]};ctx.window.scrollTo=()=>{};
+ vm.createContext(ctx);
+ for(const file of ['content.js','catalog_expanded.js','app.js'])vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),ctx);
+ assert.match(elems.main.innerHTML,/Сообщество Gortenzium/);
+ elems.main.handlers.click({target:{closest:()=>({dataset:{action:'open-telegram'}})}});
+ assert.deepEqual(opened,['open']);
+ elems.tabs.handlers.click({target:{closest:()=>({dataset:{tab:'gallery'}})}});
+ assert.match(elems.main.innerHTML,/Сообщество Gortenzium/);
+ elems.tabs.handlers.click({target:{closest:()=>({dataset:{tab:'more'}})}});
+ assert.match(elems.main.innerHTML,/Сообщество Gortenzium/);
+});
+test('v1.8: фото нельзя отправить без двух действий пользователя, в подписи только сорт',()=>{
+ const id='01234567-89ab-4cde-8f01-234567890abc',sent=[];
+ const store={'gortenziya_moy_sad_v1':JSON.stringify({version:1,completed:[],plants:[{id:'p',name:'Куст у дома',variety:'Limelight',place:'Адрес у дома 123',notes:'Личные данные',photos:[id]}]})};
+ const ctx={window:{GardenCore:C,GardenAndroid:{cloudConfigured:()=>false,sharePhoto:(photo,caption)=>sent.push({photo,caption})}},console,Date,Math,JSON,URL,Blob,setTimeout:()=>1,clearTimeout:()=>{},
+   localStorage:{getItem:k=>store[k]||null,setItem:(k,v)=>store[k]=v},FormData:class{constructor(form){this.values=form.values||{};}get(k){return this.values[k]||'';}}};
+ class El{constructor(){this.innerHTML='';this.classList={toggle:()=>{},add:()=>{},remove:()=>{},contains:()=>true};this.dataset={};this.handlers={};}addEventListener(n,f){this.handlers[n]=f;}querySelectorAll(){return [new El(),new El(),new El()];}querySelector(){return null;}setAttribute(){}}
+ const elems={main:new El(),overlay:new El(),tabs:new El(),toast:new El(),'backup-file':new El()};
+ ctx.document={getElementById:id=>elems[id]};ctx.window.scrollTo=()=>{};
+ vm.createContext(ctx);for(const file of ['content.js','catalog_expanded.js','app.js'])vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),ctx);
+ elems.tabs.handlers.click({target:{closest:()=>({dataset:{tab:'plants'}})}});
+ elems.main.handlers.click({target:{closest:()=>({dataset:{action:'open-plant',id:'p'}})}});
+ assert.match(elems.main.innerHTML,/data-action="share-telegram-photo"/);
+ elems.main.handlers.click({target:{closest:()=>({dataset:{action:'share-telegram-photo',id:'p',photo:id}})}});
+ assert.equal(sent.length,0);assert.match(elems.overlay.innerHTML,/выберите Telegram/i);
+ elems.overlay.handlers.click({target:{closest:()=>({dataset:{action:'confirm-telegram-share',id:'p',photo:id}})}});
+ assert.equal(sent.length,1);assert.equal(sent[0].photo,id);assert.match(sent[0].caption,/Limelight/);
+ assert.doesNotMatch(sent[0].caption,/Адрес|Личные|у дома/);
+ elems.main.handlers.click({target:{closest:()=>({dataset:{action:'share-telegram-photo',id:'p',photo:'bad'}})}});
+ assert.equal(sent.length,1);
+});
+test('v1.8: Android передаёт только выбранный JPEG через ограниченный FileProvider',()=>{
+ const manifest=fs.readFileSync(path.join(root,'../AndroidManifest.xml'),'utf8');
+ const kt=fs.readFileSync(path.join(root,'../java/ru/gortenziya/moisad/MainActivity.kt'),'utf8');
+ const xml=fs.readFileSync(path.join(root,'../res/xml/photo_share_paths.xml'),'utf8');
+ assert.match(manifest,/android:exported="false"[\s\S]*?android:grantUriPermissions="true"/);
+ assert.match(kt,/FileProvider\.getUriForFile/);
+ assert.match(kt,/Intent\.ACTION_SEND/);
+ assert.match(kt,/Intent\.FLAG_GRANT_READ_URI_PERMISSION/);
+ assert.match(xml,/<files-path name="garden_photos" path="garden_photos\/"\s*\/>/);
+ assert.doesNotMatch(xml,/<root-path|external-path/);
 });
 
 console.log(`ИТОГО: ${total} тестов пройдено`);

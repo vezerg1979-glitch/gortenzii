@@ -1,14 +1,28 @@
-# Фотографии встроенного справочника (версия 1.5)
+# Фотографии встроенного справочника (версия 1.6)
 
-Фотографии загружаются **по желанию пользователя** из Wikimedia Commons и не входят в ZIP/APK. Нажмите «Показать онлайн-фото» в справочнике. При отсутствии интернета пользователь может добавить собственную фотографию на телефон. Нет проверенного фото — показываем пустую карточку, не выдавая фото другого сорта за нужный. Фото автора указаны в карточке сорта; ссылка ведёт на оригинальную страницу с лицензией. Сервис Wikimedia Commons при загрузке изображения получает сетевой запрос устройства.
+В версии 1.6 в ZIP/APK добавлены **встроенные фотографии гортензий**, поэтому карточки сортов открываются с изображениями даже без интернета.
 
-- **Bobo** — Michele Dorsey Walfred; CC BY 2.0; [файл Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Bobo_Hydrangea.jpg).
-- **Little Lime** — Michele Dorsey Walfred; CC BY 2.0; [файл Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Hydrangea_paniculata_%E2%80%9CLittle_Lime%E2%80%9D.jpg).
-- **Limelight** — James Steakley; CC BY-SA 3.0; [файл Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Hydrangea_paniculata_'Limelight'.JPG).
-- **Vanille Fraise** — Homoarborea; CC0 1.0; [файл Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Hydrngea_paniculata_'Vanille-Fraise'_bloeiwijze.jpg).
-- **Pinky Winky** — Cephas; CC BY-SA 4.0; [файл Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Hydrangea_paniculata_'Pinky_Winky'_JRVdH_03.jpg).
-- **Phantom** — Cephas; CC BY-SA 4.0; [файл Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Hydrangea_paniculata_'Phantom'_JRVdH_01.jpg).
-- **Grandiflora** — Shuvaev; CC BY 4.0; [файл Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Hydrangea_paniculata_'Grandiflora'%2C_Tallinn_Botanic_Garden_02.jpg).
-- **Tardiva** — Agnieszka Kwiecień, Nova; CC BY-SA 4.0; [файл Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Hydrangea_paniculata_'Tardiva'_Hortensja_bukietowa_2017-10-15_02.jpg).
+## Что именно встроено
 
-Личные фотографии выбирает пользователь через системный пикер Android. Приложение сохраняет уменьшенную JPEG-копию без EXIF и не передаёт фото третьим лицам; исходный файл в галерее не удаляет. Личная фотография имеет приоритет над онлайн-снимком. JSON-копия сохраняет лишь ссылку-идентификатор — **не само фото**.
+- Для 12 сортов подготовлены локальные фотографии-превью в папке `app/src/main/assets/catalog_photos/`.
+- Изображения созданы как встроенные иллюстративные фото на основе фотографий гортензий из приложенного пользователем пособия.
+- Эти фото служат для удобной визуальной навигации по справочнику и доступны офлайн.
+
+## Онлайн-источники для точных фотографий сорта
+
+Для части сортов дополнительно сохранены ссылки на Wikimedia Commons. Они не обязательны для работы приложения, но позволяют открыть страницу с точной фотографией сорта и лицензией:
+
+- **Bobo** — Michele Dorsey Walfred; CC BY 2.0; <https://commons.wikimedia.org/wiki/File:Bobo_Hydrangea.jpg>
+- **Little Lime** — Michele Dorsey Walfred; CC BY 2.0; <https://commons.wikimedia.org/wiki/File:Hydrangea_paniculata_%E2%80%9CLittle_Lime%E2%80%9D.jpg>
+- **Limelight** — James Steakley; CC BY-SA 3.0; <https://commons.wikimedia.org/wiki/File:Hydrangea_paniculata_'Limelight'.JPG>
+- **Vanille Fraise** — Homoarborea; CC0 1.0; <https://commons.wikimedia.org/wiki/File:Hydrngea_paniculata_'Vanille-Fraise'_bloeiwijze.jpg>
+- **Pinky Winky** — Cephas; CC BY-SA 4.0; <https://commons.wikimedia.org/wiki/File:Hydrangea_paniculata_'Pinky_Winky'_JRVdH_03.jpg>
+- **Phantom** — Cephas; CC BY-SA 4.0; <https://commons.wikimedia.org/wiki/File:Hydrangea_paniculata_'Phantom'_JRVdH_01.jpg>
+- **Grandiflora** — Shuvaev; CC BY 4.0; <https://commons.wikimedia.org/wiki/File:Hydrangea_paniculata_'Grandiflora'%2C_Tallinn_Botanic_Garden_02.jpg>
+- **Tardiva** — Agnieszka Kwiecień, Nova; CC BY-SA 4.0; <https://commons.wikimedia.org/wiki/File:Hydrangea_paniculata_'Tardiva'_Hortensja_bukietowa_2017-10-15_02.jpg>
+
+## Пользовательские фотографии
+
+Пользователь по-прежнему может добавить собственное фото сорта через системный пикер Android. Приложение сохраняет уменьшенную JPEG-копию без EXIF и не публикует её автоматически.
+
+Личное фото имеет приоритет над встроенной фотографией справочника.

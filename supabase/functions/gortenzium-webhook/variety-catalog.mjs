@@ -1,0 +1,407 @@
+// Generated from bundled catalog v1.7; extend together with supabase/varieties_seed.sql.
+export const knownVarieties = [
+  {
+    "key": "bobo",
+    "name": "Bobo"
+  },
+  {
+    "key": "little_lime",
+    "name": "Little Lime"
+  },
+  {
+    "key": "limelight",
+    "name": "Limelight"
+  },
+  {
+    "key": "vanille_fraise",
+    "name": "Vanille Fraise"
+  },
+  {
+    "key": "самарская_лидия",
+    "name": "Самарская Лидия"
+  },
+  {
+    "key": "pinky_winky",
+    "name": "Pinky Winky"
+  },
+  {
+    "key": "phantom",
+    "name": "Phantom"
+  },
+  {
+    "key": "grandiflora",
+    "name": "Grandiflora"
+  },
+  {
+    "key": "diamant_rouge",
+    "name": "Diamant Rouge"
+  },
+  {
+    "key": "quick_fire",
+    "name": "Quick Fire"
+  },
+  {
+    "key": "tardiva",
+    "name": "Tardiva"
+  },
+  {
+    "key": "polar_bear",
+    "name": "Polar Bear"
+  },
+  {
+    "key": "baby_lace",
+    "name": "Baby Lace"
+  },
+  {
+    "key": "bonfire",
+    "name": "Bonfire"
+  },
+  {
+    "key": "candlelight",
+    "name": "Candlelight"
+  },
+  {
+    "key": "confetti",
+    "name": "Confetti"
+  },
+  {
+    "key": "early_harry",
+    "name": "Early Harry"
+  },
+  {
+    "key": "fire_light",
+    "name": "Fire Light"
+  },
+  {
+    "key": "fraise_melba",
+    "name": "Fraise Melba"
+  },
+  {
+    "key": "graffiti",
+    "name": "Graffiti"
+  },
+  {
+    "key": "little_fresco",
+    "name": "Little Fresco"
+  },
+  {
+    "key": "little_quick_fire",
+    "name": "Little Quick Fire"
+  },
+  {
+    "key": "living_candy_love",
+    "name": "Living Candy Love"
+  },
+  {
+    "key": "living_colourful_cocktail",
+    "name": "Living Colourful Cocktail"
+  },
+  {
+    "key": "living_cotton_cream",
+    "name": "Living Cotton Cream"
+  },
+  {
+    "key": "living_infinity",
+    "name": "Living Infinity"
+  },
+  {
+    "key": "living_little_blossom",
+    "name": "Living Little Blossom"
+  },
+  {
+    "key": "living_little_passion",
+    "name": "Living Little Passion"
+  },
+  {
+    "key": "living_little_rosy",
+    "name": "Living Little Rosy"
+  },
+  {
+    "key": "living_milk_honey",
+    "name": "Living Milk & Honey"
+  },
+  {
+    "key": "living_pink_rose",
+    "name": "Living Pink & Rose"
+  },
+  {
+    "key": "living_pinky_promise",
+    "name": "Living Pinky Promise"
+  },
+  {
+    "key": "living_raspberry_pink",
+    "name": "Living Raspberry Pink"
+  },
+  {
+    "key": "living_red_velvet",
+    "name": "Living Red Velvet"
+  },
+  {
+    "key": "living_royal_flower",
+    "name": "Living Royal Flower"
+  },
+  {
+    "key": "living_strawberry_blossom",
+    "name": "Living Strawberry Blossom"
+  },
+  {
+    "key": "living_sugar_rush",
+    "name": "Living Sugar Rush"
+  },
+  {
+    "key": "living_summer_snow",
+    "name": "Living Summer Snow"
+  },
+  {
+    "key": "living_touch_of_pink",
+    "name": "Living Touch of Pink"
+  },
+  {
+    "key": "pastelgreen",
+    "name": "Pastelgreen"
+  },
+  {
+    "key": "pinkachu",
+    "name": "Pinkachu"
+  },
+  {
+    "key": "redlight",
+    "name": "Redlight"
+  },
+  {
+    "key": "skyfall",
+    "name": "Skyfall"
+  },
+  {
+    "key": "jane",
+    "name": "Jane"
+  },
+  {
+    "key": "savill_lace",
+    "name": "Savill Lace"
+  },
+  {
+    "key": "kyushu",
+    "name": "Kyushu"
+  },
+  {
+    "key": "altona",
+    "name": "Altona"
+  },
+  {
+    "key": "bläuling",
+    "name": "Bläuling"
+  },
+  {
+    "key": "blaumeise",
+    "name": "Blaumeise"
+  },
+  {
+    "key": "brügg",
+    "name": "Brügg"
+  },
+  {
+    "key": "colorado",
+    "name": "Colorado"
+  },
+  {
+    "key": "dalian",
+    "name": "Dalian"
+  },
+  {
+    "key": "étoile_violette",
+    "name": "Étoile Violette"
+  },
+  {
+    "key": "générale_vicomtesse_de_vibraye",
+    "name": "Générale Vicomtesse de Vibraye"
+  },
+  {
+    "key": "kardinal",
+    "name": "Kardinal"
+  },
+  {
+    "key": "klaveren",
+    "name": "Klaveren"
+  },
+  {
+    "key": "koria",
+    "name": "Koria"
+  },
+  {
+    "key": "lanarth_white",
+    "name": "Lanarth White"
+  },
+  {
+    "key": "libelle",
+    "name": "Libelle"
+  },
+  {
+    "key": "madame_emile_mouillère",
+    "name": "Madame Emile Mouillère"
+  },
+  {
+    "key": "magical_colourdream",
+    "name": "Magical Colourdream"
+  },
+  {
+    "key": "magical_garnet",
+    "name": "Magical Garnet"
+  },
+  {
+    "key": "magical_harmony",
+    "name": "Magical Harmony"
+  },
+  {
+    "key": "magical_revolution",
+    "name": "Magical Revolution"
+  },
+  {
+    "key": "magical_rhapsody",
+    "name": "Magical Rhapsody"
+  },
+  {
+    "key": "magical_wings",
+    "name": "Magical Wings"
+  },
+  {
+    "key": "mariesii_lilacina",
+    "name": "Mariesii Lilacina"
+  },
+  {
+    "key": "möwe",
+    "name": "Möwe"
+  },
+  {
+    "key": "nachtigall",
+    "name": "Nachtigall"
+  },
+  {
+    "key": "parzifal",
+    "name": "Parzifal"
+  },
+  {
+    "key": "pengwyn",
+    "name": "Pengwyn"
+  },
+  {
+    "key": "rotschwanz",
+    "name": "Rotschwanz"
+  },
+  {
+    "key": "schöne_bautznerin",
+    "name": "Schöne Bautznerin"
+  },
+  {
+    "key": "together",
+    "name": "Together"
+  },
+  {
+    "key": "tokyo_delight",
+    "name": "Tokyo Delight"
+  },
+  {
+    "key": "trebah_silver",
+    "name": "Trebah Silver"
+  },
+  {
+    "key": "veitchii",
+    "name": "Veitchii"
+  },
+  {
+    "key": "wedding_gown",
+    "name": "Wedding Gown"
+  },
+  {
+    "key": "zorro",
+    "name": "Zorro"
+  },
+  {
+    "key": "beni_yama",
+    "name": "Beni-yama"
+  },
+  {
+    "key": "bluebird",
+    "name": "Bluebird"
+  },
+  {
+    "key": "diadem",
+    "name": "Diadem"
+  },
+  {
+    "key": "fuji_no_taki",
+    "name": "Fuji-no-taki"
+  },
+  {
+    "key": "grayswood",
+    "name": "Grayswood"
+  },
+  {
+    "key": "kiyosumi",
+    "name": "Kiyosumi"
+  },
+  {
+    "key": "miranda",
+    "name": "Miranda"
+  },
+  {
+    "key": "miyama_yae_murasaki",
+    "name": "Miyama-yae-murasaki"
+  },
+  {
+    "key": "rosalba",
+    "name": "Rosalba"
+  },
+  {
+    "key": "shirofuji",
+    "name": "Shirofuji"
+  },
+  {
+    "key": "shōjō",
+    "name": "Shōjō"
+  },
+  {
+    "key": "tiara",
+    "name": "Tiara"
+  },
+  {
+    "key": "anthony_bullivant",
+    "name": "Anthony Bullivant"
+  },
+  {
+    "key": "hot_chocolate",
+    "name": "Hot Chocolate"
+  },
+  {
+    "key": "macrophylla",
+    "name": "Macrophylla"
+  },
+  {
+    "key": "peter_chappell",
+    "name": "Peter Chappell"
+  },
+  {
+    "key": "velvet_and_lace",
+    "name": "Velvet and Lace"
+  },
+  {
+    "key": "snow_queen",
+    "name": "Snow Queen"
+  },
+  {
+    "key": "snowflake",
+    "name": "Snowflake"
+  },
+  {
+    "key": "annabelle",
+    "name": "Annabelle"
+  },
+  {
+    "key": "viridescens",
+    "name": "Viridescens"
+  },
+  {
+    "key": "yohraku_tama",
+    "name": "Yohraku-tama"
+  }
+];

@@ -1,0 +1,4 @@
+[functions.gortenzium-webhook]
+# Telegram sends its own secret header, not a Supabase JWT.
+# The function checks the webhook header and the exact forum group numeric ID itself.
+verify_jwt = false

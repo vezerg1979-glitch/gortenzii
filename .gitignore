@@ -29,3 +29,8 @@ node_modules/
 
 # Personal Supabase project configuration
 supabase.properties
+
+# Private server-side Telegram secrets
+supabase/functions/.env
+supabase/functions/.env.*
+!supabase/functions/.env.example
